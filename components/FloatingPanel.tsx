@@ -5,6 +5,7 @@ import { Position, Size } from '../types';
 interface FloatingPanelProps {
   children: ReactNode;
   title: string;
+  titleElement?: ReactNode;
   initialPosition?: Position;
   initialSize?: Size;
   minSize?: Size;
@@ -18,6 +19,7 @@ interface FloatingPanelProps {
 export const FloatingPanel: React.FC<FloatingPanelProps> = ({
   children,
   title,
+  titleElement,
   initialPosition = { x: 50, y: 50 },
   initialSize = { width: 400, height: 300 },
   minSize = { width: 300, height: 200 },
@@ -60,8 +62,8 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
   const handleStartDrag = (e: React.MouseEvent | React.TouchEvent) => {
     // Check if target is a button or inside a button (to allow clicking header actions)
     if ((e.target as HTMLElement).closest('button')) return;
-    // Also allow interacting with inputs if we ever put them in header
-    if ((e.target as HTMLElement).tagName === 'INPUT') return;
+    // Also allow interacting with inputs/selects if we put them in header
+    if (['INPUT', 'SELECT', 'OPTION'].includes((e.target as HTMLElement).tagName)) return;
 
     if (e.cancelable) e.preventDefault(); 
     
@@ -163,7 +165,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
       >
         <div className="flex items-center gap-2 text-gray-300 min-w-0 mr-2">
           <GripHorizontal size={20} className="shrink-0" />
-          <span className="text-sm font-medium truncate hidden sm:block">{title}</span>
+          {titleElement || <span className="text-sm font-medium truncate hidden sm:block">{title}</span>}
         </div>
         
         <div className="flex items-center gap-1 md:gap-2 shrink-0">

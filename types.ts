@@ -12,6 +12,8 @@ export interface VncProfile {
   id: string;
   name: string;
   url: string;
+  type?: 'vnc' | 'ttyd';       // 默认 vnc
+  tmuxTarget?: string;           // ttyd 类型时，tmux send-keys 的目标，如 "master:cicy_master_xk_bot.0"
 }
 
 export interface AppSettings {

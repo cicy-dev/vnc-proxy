@@ -3,7 +3,7 @@ import { Send, Settings, Wifi, WifiOff, X, Plus, Trash2, Edit2, Keyboard, Check,
 import { VncFrame } from './components/VncFrame';
 import { FloatingPanel } from './components/FloatingPanel';
 import { VoiceFloatingButton } from './components/VoiceFloatingButton';
-import { sendCommandToVnc, sendSystemEvent } from './services/mockApi';
+import { sendCommandToVnc, sendSystemEvent, sendShortcut } from './services/mockApi';
 import { AppSettings, VncProfile, Position, Size } from './types';
 
 // Default configuration
@@ -13,10 +13,13 @@ const DEFAULT_PROFILE: VncProfile = {
   url: '/vnc/vnc.html?autoconnect=true&resize=scale&path=vnc/websockify'
 };
 
+// ttyd profiles 从 /api/bots 动态加载
+const DEFAULT_TTYD_PROFILES: VncProfile[] = [];
+
 const DEFAULT_SETTINGS: AppSettings = {
   panelPosition: { x: 20, y: 20 },
   panelSize: { width: 450, height: 280 },
-  profiles: [DEFAULT_PROFILE],
+  profiles: [DEFAULT_PROFILE, ...DEFAULT_TTYD_PROFILES],
   activeProfileId: 'default',
   forwardEvents: false,
   lastDraft: '',
@@ -26,7 +29,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   voiceButtonPosition: { x: 40, y: 200 }
 };
 
-const STORAGE_KEY = 'vnc_app_settings_v6';
+const STORAGE_KEY = 'vnc_app_settings_v7';
 
 // Speech Recognition Type Definition
 declare global {
@@ -55,32 +58,55 @@ const App: React.FC = () => {
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
   const [tempProfileName, setTempProfileName] = useState('');
   const [tempProfileUrl, setTempProfileUrl] = useState('');
+  const [tempProfileType, setTempProfileType] = useState<'vnc' | 'ttyd'>('vnc');
+  const [tempProfileTmux, setTempProfileTmux] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // --- Initialization & Persistence ---
   
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
+    const init = async () => {
+      // 1. 从 /api/bots 加载 bot 列表，动态生成 ttyd profiles
+      let botProfiles: VncProfile[] = [];
       try {
-        const parsed = JSON.parse(saved);
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed }); 
-        if (parsed.lastDraft) {
-            setPromptText(parsed.lastDraft);
-        }
+        const res = await fetch('/api/bots');
+        const bots: { bot_name: string; win_id: string; group: string }[] = await res.json();
+        botProfiles = bots.map(b => ({
+          id: `ttyd-${b.bot_name}`,
+          name: `${b.group} 🖥`,
+          url: `/ttyd/${b.bot_name}/`,
+          type: 'ttyd' as const,
+          tmuxTarget: b.win_id,
+        }));
       } catch (e) {
-        console.error("Failed to parse settings", e);
+        console.error('Failed to load bots', e);
       }
-    } else {
-        if (window.innerWidth < 768) {
-            setSettings(prev => ({
-                ...prev,
-                panelPosition: { x: 10, y: 10 },
-                panelSize: { width: window.innerWidth - 20, height: 250 },
-                voiceButtonPosition: { x: 20, y: 150 }
-            }));
+
+      // 2. 加载 localStorage
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          // 合并：保留用户自定义的 VNC profiles，替换 ttyd profiles 为最新数据
+          const userProfiles = (parsed.profiles || []).filter((p: any) => p.type !== 'ttyd' && !p.id?.startsWith('ttyd-'));
+          parsed.profiles = [DEFAULT_PROFILE, ...userProfiles.filter((p: any) => p.id !== 'default'), ...botProfiles];
+          setSettings({ ...DEFAULT_SETTINGS, ...parsed });
+          if (parsed.lastDraft) setPromptText(parsed.lastDraft);
+        } catch (e) {
+          console.error("Failed to parse settings", e);
         }
-    }
-    setIsLoaded(true);
+      } else {
+        // 首次加载
+        setSettings(prev => {
+          const base = window.innerWidth < 768
+            ? { ...prev, panelPosition: { x: 10, y: 10 }, panelSize: { width: window.innerWidth - 20, height: 250 }, voiceButtonPosition: { x: 20, y: 150 } }
+            : prev;
+          return { ...base, profiles: [DEFAULT_PROFILE, ...botProfiles] };
+        });
+      }
+      setIsLoaded(true);
+    };
+    init();
   }, []);
 
   useEffect(() => {
@@ -116,7 +142,7 @@ const App: React.FC = () => {
         if (text.trim()) {
             setIsSending(true);
             try {
-                await sendCommandToVnc(text);
+                await sendCommandToVnc(text, activeProfile?.type, activeProfile?.tmuxTarget);
             } catch (error) {
                 console.error("Voice command failed", error);
             } finally {
@@ -166,20 +192,29 @@ const App: React.FC = () => {
   // --- Event Forwarding ---
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (!settings.forwardEvents) return;
     const target = e.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
-    if (settings.forwardEvents) {
-      sendSystemEvent({
-        type: 'keydown',
-        key: e.key,
-        code: e.code,
-        ctrlKey: e.ctrlKey,
-        shiftKey: e.shiftKey,
-        altKey: e.altKey,
-        metaKey: e.metaKey
-      });
+    // 拦截 Ctrl/Cmd + C/V/A/Z，转发到 VNC
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && ['c', 'v', 'a', 'z'].includes(e.key.toLowerCase())) {
+      e.preventDefault();
+      e.stopPropagation();
+      sendShortcut(`ctrl+${e.key.toLowerCase()}`);
+      return;
     }
+
+    // 其他按键也转发
+    sendSystemEvent({
+      type: 'keydown',
+      key: e.key,
+      code: e.code,
+      ctrlKey: e.ctrlKey,
+      shiftKey: e.shiftKey,
+      altKey: e.altKey,
+      metaKey: e.metaKey
+    });
   }, [settings.forwardEvents]);
 
   useEffect(() => {
@@ -198,11 +233,13 @@ const App: React.FC = () => {
     setIsSending(true);
 
     try {
-      await sendCommandToVnc(command);
+      await sendCommandToVnc(command, activeProfile?.type, activeProfile?.tmuxTarget);
     } catch (error) {
       console.error("Failed to send command", error);
     } finally {
       setIsSending(false);
+      // 发送后自动聚焦回输入框
+      setTimeout(() => textareaRef.current?.focus(), 50);
     }
   };
 
@@ -258,6 +295,8 @@ const App: React.FC = () => {
     setEditingProfileId(profile.id);
     setTempProfileName(profile.name);
     setTempProfileUrl(profile.url);
+    setTempProfileType(profile.type || 'vnc');
+    setTempProfileTmux(profile.tmuxTarget || '');
   };
 
   const handleSaveProfile = () => {
@@ -266,7 +305,7 @@ const App: React.FC = () => {
       ...prev,
       profiles: prev.profiles.map(p => 
         p.id === editingProfileId 
-          ? { ...p, name: tempProfileName, url: tempProfileUrl } 
+          ? { ...p, name: tempProfileName, url: tempProfileUrl, type: tempProfileType, tmuxTarget: tempProfileTmux } 
           : p
       )
     }));
@@ -295,6 +334,9 @@ const App: React.FC = () => {
     setSettings(prev => ({ ...prev, activeProfileId: id }));
   };
 
+  // Profile selector dropdown
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+
   // --- Derived State ---
   const activeProfile = settings.profiles.find(p => p.id === settings.activeProfileId) || settings.profiles[0];
 
@@ -302,9 +344,10 @@ const App: React.FC = () => {
 
   return (
     <div className="relative w-screen h-screen bg-black overflow-hidden font-sans">
-      {/* Full Screen VNC Iframe */}
+      {/* Full Screen Iframes - display:none 隐藏非活跃的 */}
       <VncFrame 
-        url={activeProfile?.url || ''} 
+        profiles={settings.profiles}
+        activeProfileId={settings.activeProfileId}
         isInteractingWithOverlay={isInteracting} 
       />
 
@@ -335,7 +378,20 @@ const App: React.FC = () => {
       {/* Floating Prompt Controller with Integrated Top Bar */}
       {settings.showPrompt && (
           <FloatingPanel
-            title={activeProfile.name}
+            title=""
+            titleElement={
+              <select
+                value={settings.activeProfileId || ''}
+                onChange={(e) => handleSelectProfile(e.target.value)}
+                className="bg-transparent text-white text-sm font-medium outline-none cursor-pointer max-w-[160px] truncate"
+              >
+                {settings.profiles.map(p => (
+                  <option key={p.id} value={p.id} className="bg-gray-900 text-white">
+                    {p.name} {p.type === 'ttyd' ? '🖥' : '🖵'}
+                  </option>
+                ))}
+              </select>
+            }
             initialPosition={settings.panelPosition}
             initialSize={settings.panelSize}
             minSize={{ width: 340, height: 180 }}
@@ -384,10 +440,11 @@ const App: React.FC = () => {
           >
             <form onSubmit={handleSendPrompt} className="relative h-full flex flex-col p-4">
               <textarea
+                ref={textareaRef}
                 value={promptText}
                 onChange={(e) => setPromptText(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     handleSendPrompt();
                   }
@@ -447,8 +504,8 @@ const App: React.FC = () => {
                   <div 
                     key={profile.id}
                     onClick={() => {
-                        setEditingProfileId(null);
-                        if(window.innerWidth < 768) handleSelectProfile(profile.id);
+                        handleSelectProfile(profile.id);
+                        if(window.innerWidth < 768) closeSettings();
                     }}
                     className={`p-3 rounded-md cursor-pointer flex items-center justify-between group transition-colors ${
                       settings.activeProfileId === profile.id 
@@ -513,7 +570,7 @@ const App: React.FC = () => {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-400 mb-2">VNC URL</label>
+                      <label className="block text-sm font-medium text-gray-400 mb-2">URL</label>
                       <div className="relative">
                         <input
                           type="text"
@@ -527,6 +584,31 @@ const App: React.FC = () => {
                         </div>
                       </div>
                     </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-400 mb-2">Type</label>
+                      <div className="flex gap-3">
+                        <button type="button" onClick={() => setTempProfileType('vnc')}
+                          className={`flex-1 py-2 rounded text-sm font-medium transition-colors ${tempProfileType === 'vnc' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+                          VNC
+                        </button>
+                        <button type="button" onClick={() => setTempProfileType('ttyd')}
+                          className={`flex-1 py-2 rounded text-sm font-medium transition-colors ${tempProfileType === 'ttyd' ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-400 hover:bg-gray-700'}`}>
+                          TTYD
+                        </button>
+                      </div>
+                    </div>
+                    {tempProfileType === 'ttyd' && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-2">Tmux Target</label>
+                        <input
+                          type="text"
+                          value={tempProfileTmux}
+                          onChange={(e) => setTempProfileTmux(e.target.value)}
+                          className="w-full bg-black border border-gray-700 rounded px-4 py-3 text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                          placeholder="master:cicy_master_xk_bot.0"
+                        />
+                      </div>
+                    )}
                     
                     <div className="pt-4 flex flex-col-reverse md:flex-row items-center justify-between border-t border-gray-800 mt-8 gap-4">
                       <button 
