@@ -6,8 +6,14 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       server: {
-        port: 3000,
+        port: 13334,
         host: '0.0.0.0',
+        allowedHosts: ['g-13334.cicy.de5.net'],
+        proxy: {
+          '/api': 'http://127.0.0.1:13335',
+          '/vnc': { target: 'http://127.0.0.1:13335', ws: true },
+          '/ttyd': { target: 'http://127.0.0.1:13335', ws: true },
+        },
       },
       plugins: [react()],
       define: {

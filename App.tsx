@@ -9,8 +9,8 @@ import { AppSettings, VncProfile, Position, Size } from './types';
 // Default configuration
 const DEFAULT_PROFILE: VncProfile = {
   id: 'default',
-  name: 'Demo NoVNC',
-  url: 'https://novnc.com/noVNC/vnc.html'
+  name: 'My VNC',
+  url: '/vnc/vnc.html?autoconnect=true&resize=scale&path=vnc/websockify'
 };
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -26,7 +26,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   voiceButtonPosition: { x: 40, y: 200 }
 };
 
-const STORAGE_KEY = 'vnc_app_settings_v4';
+const STORAGE_KEY = 'vnc_app_settings_v6';
 
 // Speech Recognition Type Definition
 declare global {
@@ -49,8 +49,7 @@ const App: React.FC = () => {
   
   // Voice State
   const [isListening, setIsListening] = useState(false);
-  const recognitionRef = useRef<any>(null);
-  const voiceModeRef = useRef<'append' | 'direct'>('append'); 
+  const voiceModeRef = useRef<'append' | 'direct'>('append');
 
   // Settings Form State
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
@@ -102,7 +101,10 @@ const App: React.FC = () => {
     return () => clearTimeout(timeoutId);
   }, [promptText, isLoaded]);
 
-  // --- Voice Input Logic ---
+  // --- Voice Input Logic (Server-side STT) ---
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const handleVoiceResult = useCallback(async (text: string) => {
     if (voiceModeRef.current === 'append') {
@@ -124,73 +126,39 @@ const App: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false; // We want short command bursts
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-
-      recognition.onstart = () => setIsListening(true);
-      recognition.onend = () => setIsListening(false);
-      
-      recognition.onresult = (event: any) => {
-        let finalTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            finalTranscript += event.results[i][0].transcript;
-          }
-        }
-        if (finalTranscript) {
-           handleVoiceResult(finalTranscript);
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        console.error("Speech recognition error", event.error);
-        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-            setIsListening(false);
-        }
-      };
-
-      recognitionRef.current = recognition;
-    }
-  }, [handleVoiceResult]);
-
-  const startVoiceRecording = (mode: 'append' | 'direct') => {
-    if (!recognitionRef.current) {
-        // Speech API not supported
-        return;
-    }
-    
+  const startVoiceRecording = async (mode: 'append' | 'direct') => {
     voiceModeRef.current = mode;
-
-    // If already listening, we don't need to restart.
-    // This handles the case where users tap quickly or the previous stop timer was cleared.
-    if (isListening) {
-        return;
-    }
-
     try {
-        recognitionRef.current.start();
-    } catch (e: any) {
-        // Handle race conditions where state might not be perfectly synced
-        if (e.name === 'InvalidStateError' || e.message?.includes('started')) {
-            console.log("Speech recognition already active.");
-        } else {
-            console.error("Failed to start speech recognition:", e);
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        if (blob.size < 1000) return; // 太短忽略
+        setIsListening(false);
+        try {
+          const res = await fetch('/api/voice', { method: 'POST', body: blob });
+          const data = await res.json();
+          if (data.text) handleVoiceResult(data.text);
+        } catch (e) {
+          console.error('Voice upload failed', e);
         }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setIsListening(true);
+    } catch (e) {
+      console.error('Mic access failed', e);
     }
   };
 
   const stopVoiceRecording = () => {
-    if (recognitionRef.current && isListening) {
-        try {
-            recognitionRef.current.stop();
-        } catch (e) {
-            console.error("Error stopping speech recognition:", e);
-        }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
     }
   };
 
