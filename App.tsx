@@ -21,6 +21,7 @@ const VNC2_PROFILE: VncProfile = {
   display: ':2'
 };
 
+// TODO: remove all ttyd logic from vnc-proxy (ttyd has its own project: ttyd-proxy)
 // ttyd profiles 从 /api/bots 动态加载
 const DEFAULT_TTYD_PROFILES: VncProfile[] = [];
 
