@@ -118,7 +118,7 @@ const server = http.createServer((req, res) => {
       try {
         const text_data = JSON.parse(body);
         const { text } = text_data;
-        if (!text) return json(res, { success: false, error: 'no text' });
+        if (!text || !text.trim()) return json(res, { success: false, error: 'no text' });
         const display = text_data.display || ':1';
         // 写入剪贴板，然后 Ctrl+V 粘贴，再按 Enter
         execSync(`echo -n ${JSON.stringify(text)} | DISPLAY=${display} xsel --clipboard --input`, { timeout: 5000 });
@@ -192,7 +192,7 @@ const server = http.createServer((req, res) => {
         const { text } = JSON.parse(body);
         console.log('[correctEnglish] Received text:', text);
         
-        if (!text) return json(res, { success: false, error: 'no text' });
+        if (!text || !text.trim()) return json(res, { success: false, error: 'no text' });
         
         // Use Hugging Face Inference API (free)
         const hfUrl = 'https://api-inference.huggingface.co/models/facebook/bart-large-cnn';
