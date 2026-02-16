@@ -18,7 +18,7 @@ const DEFAULT_TTYD_PROFILES: VncProfile[] = [];
 
 const DEFAULT_SETTINGS: AppSettings = {
   panelPosition: { x: 20, y: 20 },
-  panelSize: { width: 450, height: 280 },
+  panelSize: { width: 450, height: 188 },
   profiles: [DEFAULT_PROFILE, ...DEFAULT_TTYD_PROFILES],
   activeProfileId: 'default',
   forwardEvents: false,

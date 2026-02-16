@@ -159,7 +159,7 @@ export const FloatingPanel: React.FC<FloatingPanelProps> = ({
     >
       {/* Header / Drag Handle */}
       <div
-        className="h-14 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-3 cursor-move select-none touch-none shrink-0"
+        className="h-12 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-3 cursor-move select-none touch-none shrink-0"
         onMouseDown={handleStartDrag}
         onTouchStart={handleStartDrag}
       >
