@@ -57,7 +57,9 @@ const server = http.createServer((req, res) => {
         const { text } = text_data;
         if (!text) return json(res, { success: false, error: 'no text' });
         const display = text_data.display || ':1';
-        execSync(`DISPLAY=${display} xdotool type --delay 12 -- ${JSON.stringify(text)}`, { timeout: 10000 });
+        // 写入剪贴板，然后 Ctrl+V 粘贴，再按 Enter
+        execSync(`echo -n ${JSON.stringify(text)} | DISPLAY=${display} xsel --clipboard --input`, { timeout: 5000 });
+        execSync(`DISPLAY=${display} xdotool key ctrl+v`, { timeout: 5000 });
         execSync(`DISPLAY=${display} xdotool key Return`, { timeout: 5000 });
         return json(res, { success: true });
       } catch (e) {
