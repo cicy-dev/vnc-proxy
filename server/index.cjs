@@ -53,11 +53,12 @@ const server = http.createServer((req, res) => {
     req.on('data', c => body += c);
     req.on('end', () => {
       try {
-        const { text } = JSON.parse(body);
+        const text_data = JSON.parse(body);
+        const { text } = text_data;
         if (!text) return json(res, { success: false, error: 'no text' });
-        // xdotool type 到 DISPLAY :1，然后按 Enter
-        execSync(`DISPLAY=:1 xdotool type --delay 12 -- ${JSON.stringify(text)}`, { timeout: 10000 });
-        execSync(`DISPLAY=:1 xdotool key Return`, { timeout: 5000 });
+        const display = text_data.display || ':1';
+        execSync(`DISPLAY=${display} xdotool type --delay 12 -- ${JSON.stringify(text)}`, { timeout: 10000 });
+        execSync(`DISPLAY=${display} xdotool key Return`, { timeout: 5000 });
         return json(res, { success: true });
       } catch (e) {
         return json(res, { success: false, error: e.message });
@@ -72,9 +73,11 @@ const server = http.createServer((req, res) => {
     req.on('data', c => body += c);
     req.on('end', () => {
       try {
-        const { key } = JSON.parse(body);
+        const key_data = JSON.parse(body);
+        const { key } = key_data;
         if (!key) return json(res, { success: false, error: 'no key' });
-        execSync(`DISPLAY=:1 xdotool key -- ${key}`, { timeout: 5000 });
+        const display = key_data.display || ':1';
+        execSync(`DISPLAY=${display} xdotool key -- ${key}`, { timeout: 5000 });
         return json(res, { success: true });
       } catch (e) {
         return json(res, { success: false, error: e.message });

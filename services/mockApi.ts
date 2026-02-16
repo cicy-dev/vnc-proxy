@@ -1,7 +1,7 @@
 import { SystemEvent } from '../types';
 
-export const sendCommandToVnc = async (command: string, profileType?: string, tmuxTarget?: string): Promise<{ success: boolean; message: string }> => {
-  console.log('[sendCommand]', { profileType, tmuxTarget, command });
+export const sendCommandToVnc = async (command: string, profileType?: string, tmuxTarget?: string, display?: string): Promise<{ success: boolean; message: string }> => {
+  console.log('[sendCommand]', { profileType, tmuxTarget, command, display });
   
   // ttyd 模式：tmux send-keys
   if (profileType === 'ttyd' && tmuxTarget) {
@@ -18,28 +18,26 @@ export const sendCommandToVnc = async (command: string, profileType?: string, tm
   const res = await fetch('/api/type', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: command }),
+    body: JSON.stringify({ text: command, display: display || ':1' }),
   });
   const data = await res.json();
   return { success: data.success, message: data.success ? 'Typed to VNC' : data.error };
 };
 
-export const sendSystemEvent = async (event: SystemEvent): Promise<void> => {
-  // 按键转发到 VNC
+export const sendSystemEvent = async (event: SystemEvent, display?: string): Promise<void> => {
   if (event.type === 'keydown') {
     await fetch('/api/key', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key: event.code }),
+      body: JSON.stringify({ key: event.code, display: display || ':1' }),
     }).catch(() => {});
   }
 };
 
-// 发送组合键到 VNC（如 ctrl+c, ctrl+v）
-export const sendShortcut = async (key: string): Promise<void> => {
+export const sendShortcut = async (key: string, display?: string): Promise<void> => {
   await fetch('/api/key', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key }),
+    body: JSON.stringify({ key, display: display || ':1' }),
   }).catch(() => {});
 };

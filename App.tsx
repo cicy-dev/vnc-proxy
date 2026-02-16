@@ -9,8 +9,16 @@ import { AppSettings, VncProfile, Position, Size } from './types';
 // Default configuration
 const DEFAULT_PROFILE: VncProfile = {
   id: 'default',
-  name: 'My VNC',
-  url: '/vnc/vnc.html?autoconnect=true&resize=scale&path=vnc/websockify'
+  name: 'VNC :1',
+  url: '/vnc/vnc.html?autoconnect=true&resize=scale&path=vnc/websockify',
+  display: ':1'
+};
+
+const VNC2_PROFILE: VncProfile = {
+  id: 'vnc2',
+  name: 'VNC :2',
+  url: 'https://g-6082.cicy.de5.net/vnc.html?autoconnect=true&resize=scale',
+  display: ':2'
 };
 
 // ttyd profiles 从 /api/bots 动态加载
@@ -19,7 +27,7 @@ const DEFAULT_TTYD_PROFILES: VncProfile[] = [];
 const DEFAULT_SETTINGS: AppSettings = {
   panelPosition: { x: 20, y: 20 },
   panelSize: { width: 450, height: 188 },
-  profiles: [DEFAULT_PROFILE, ...DEFAULT_TTYD_PROFILES],
+  profiles: [DEFAULT_PROFILE, VNC2_PROFILE],
   activeProfileId: 'default',
   forwardEvents: false,
   lastDraft: '',
@@ -29,7 +37,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   voiceButtonPosition: { x: 40, y: 200 }
 };
 
-const STORAGE_KEY = 'vnc_app_settings_v7';
+const STORAGE_KEY = 'vnc_app_settings_v8';
 
 // Speech Recognition Type Definition
 declare global {
@@ -66,43 +74,21 @@ const App: React.FC = () => {
   
   useEffect(() => {
     const init = async () => {
-      // 1. 从 /api/bots 加载 bot 列表，动态生成 ttyd profiles
-      let botProfiles: VncProfile[] = [];
-      try {
-        const res = await fetch('/api/bots');
-        const bots: { bot_name: string; win_id: string; group: string }[] = await res.json();
-        botProfiles = bots.map(b => ({
-          id: `ttyd-${b.bot_name}`,
-          name: `${b.group} 🖥`,
-          url: `/ttyd/${b.bot_name}/`,
-          type: 'ttyd' as const,
-          tmuxTarget: b.win_id,
-        }));
-      } catch (e) {
-        console.error('Failed to load bots', e);
-      }
-
-      // 2. 加载 localStorage
+      // 加载 localStorage
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          // 合并：保留用户自定义的 VNC profiles，替换 ttyd profiles 为最新数据
-          const userProfiles = (parsed.profiles || []).filter((p: any) => p.type !== 'ttyd' && !p.id?.startsWith('ttyd-'));
-          parsed.profiles = [DEFAULT_PROFILE, ...userProfiles.filter((p: any) => p.id !== 'default'), ...botProfiles];
+          // 强制使用最新的默认 profiles
+          parsed.profiles = [DEFAULT_PROFILE, VNC2_PROFILE];
+          if (!parsed.activeProfileId || !parsed.profiles.find((p: any) => p.id === parsed.activeProfileId)) {
+            parsed.activeProfileId = 'default';
+          }
           setSettings({ ...DEFAULT_SETTINGS, ...parsed });
           if (parsed.lastDraft) setPromptText(parsed.lastDraft);
         } catch (e) {
           console.error("Failed to parse settings", e);
         }
-      } else {
-        // 首次加载
-        setSettings(prev => {
-          const base = window.innerWidth < 768
-            ? { ...prev, panelPosition: { x: 10, y: 10 }, panelSize: { width: window.innerWidth - 20, height: 250 }, voiceButtonPosition: { x: 20, y: 150 } }
-            : prev;
-          return { ...base, profiles: [DEFAULT_PROFILE, ...botProfiles] };
-        });
       }
       setIsLoaded(true);
     };
@@ -127,6 +113,9 @@ const App: React.FC = () => {
     return () => clearTimeout(timeoutId);
   }, [promptText, isLoaded]);
 
+  // --- Derived State (must be before hooks that use it) ---
+  const activeProfile = settings.profiles.find(p => p.id === settings.activeProfileId) || settings.profiles[0];
+
   // --- Voice Input Logic (Server-side STT) ---
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -142,7 +131,7 @@ const App: React.FC = () => {
         if (text.trim()) {
             setIsSending(true);
             try {
-                await sendCommandToVnc(text, activeProfile?.type, activeProfile?.tmuxTarget);
+                await sendCommandToVnc(text, activeProfile?.type, activeProfile?.tmuxTarget, activeProfile?.display);
             } catch (error) {
                 console.error("Voice command failed", error);
             } finally {
@@ -201,7 +190,7 @@ const App: React.FC = () => {
     if (mod && ['c', 'v', 'a', 'z'].includes(e.key.toLowerCase())) {
       e.preventDefault();
       e.stopPropagation();
-      sendShortcut(`ctrl+${e.key.toLowerCase()}`);
+      sendShortcut(`ctrl+${e.key.toLowerCase()}`, activeProfile?.display);
       return;
     }
 
@@ -214,8 +203,8 @@ const App: React.FC = () => {
       shiftKey: e.shiftKey,
       altKey: e.altKey,
       metaKey: e.metaKey
-    });
-  }, [settings.forwardEvents]);
+    }, activeProfile?.display);
+  }, [settings.forwardEvents, activeProfile?.display]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -233,7 +222,7 @@ const App: React.FC = () => {
     setIsSending(true);
 
     try {
-      await sendCommandToVnc(command, activeProfile?.type, activeProfile?.tmuxTarget);
+      await sendCommandToVnc(command, activeProfile?.type, activeProfile?.tmuxTarget, activeProfile?.display);
     } catch (error) {
       console.error("Failed to send command", error);
     } finally {
@@ -336,9 +325,6 @@ const App: React.FC = () => {
 
   // Profile selector dropdown
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-
-  // --- Derived State ---
-  const activeProfile = settings.profiles.find(p => p.id === settings.activeProfileId) || settings.profiles[0];
 
   if (!isLoaded) return <div className="bg-black w-screen h-screen"></div>;
 
