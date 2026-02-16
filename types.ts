@@ -27,6 +27,7 @@ export interface AppSettings {
   showPrompt: boolean;
   showVoiceControl: boolean;
   voiceButtonPosition: Position;
+  commandHistory: string[];
 }
 
 export interface SystemEvent {

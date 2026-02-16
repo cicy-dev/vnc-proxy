@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Send, Settings, Wifi, WifiOff, X, Plus, Trash2, Edit2, Keyboard, Check, Mic, MicOff, Terminal, MessageSquare, Maximize } from 'lucide-react';
+import { Send, Settings, Wifi, WifiOff, X, Plus, Trash2, Edit2, Keyboard, Check, Mic, MicOff, Terminal, MessageSquare, Maximize, Loader2, CheckCircle, History } from 'lucide-react';
 import { VncFrame } from './components/VncFrame';
 import { FloatingPanel } from './components/FloatingPanel';
 import { VoiceFloatingButton } from './components/VoiceFloatingButton';
@@ -35,7 +35,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   showPrompt: true,
   showVoiceControl: false,
   // Center Left Up roughly
-  voiceButtonPosition: { x: 40, y: 200 }
+  voiceButtonPosition: { x: 40, y: 200 },
+  commandHistory: []
 };
 
 const STORAGE_KEY = 'vnc_app_settings_v8';
@@ -57,7 +58,13 @@ const App: React.FC = () => {
   const [isInteracting, setIsInteracting] = useState(false);
   const [promptText, setPromptText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [sendSuccess, setSendSuccess] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  
+  // Command History
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [tempDraft, setTempDraft] = useState(''); // Store current input when navigating history
   
   // Voice State
   const [isListening, setIsListening] = useState(false);
@@ -84,6 +91,10 @@ const App: React.FC = () => {
           parsed.profiles = [DEFAULT_PROFILE, VNC2_PROFILE];
           if (!parsed.activeProfileId || !parsed.profiles.find((p: any) => p.id === parsed.activeProfileId)) {
             parsed.activeProfileId = 'default';
+          }
+          // Ensure commandHistory exists
+          if (!parsed.commandHistory) {
+            parsed.commandHistory = [];
           }
           setSettings({ ...DEFAULT_SETTINGS, ...parsed });
           if (parsed.lastDraft) setPromptText(parsed.lastDraft);
@@ -117,10 +128,10 @@ const App: React.FC = () => {
   // --- Derived State (must be before hooks that use it) ---
   const activeProfile = settings.profiles.find(p => p.id === settings.activeProfileId) || settings.profiles[0];
 
-  // --- Voice Input Logic (Server-side STT) ---
+  // --- Voice Input Logic (Client-side STT using Web Speech API) ---
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const recognitionRef = useRef<any>(null);
+  const interimTranscriptRef = useRef<string>('');
 
   const handleVoiceResult = useCallback(async (text: string) => {
     if (voiceModeRef.current === 'append') {
@@ -131,8 +142,12 @@ const App: React.FC = () => {
     } else if (voiceModeRef.current === 'direct') {
         if (text.trim()) {
             setIsSending(true);
+            setSendSuccess(false);
             try {
+                // Send text directly to VNC/tmux
                 await sendCommandToVnc(text, activeProfile?.type, activeProfile?.tmuxTarget, activeProfile?.display);
+                setSendSuccess(true);
+                setTimeout(() => setSendSuccess(false), 2000);
             } catch (error) {
                 console.error("Voice command failed", error);
             } finally {
@@ -140,41 +155,75 @@ const App: React.FC = () => {
             }
         }
     }
-  }, []);
+  }, [activeProfile]);
 
   const startVoiceRecording = async (mode: 'append' | 'direct') => {
     voiceModeRef.current = mode;
+    
+    // Check browser support
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      console.error('Speech recognition not supported in this browser');
+      alert('Speech recognition is not supported in your browser. Please use Chrome, Edge, or Safari.');
+      return;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
-      audioChunksRef.current = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'zh-CN'; // 中文简体
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        interimTranscriptRef.current = '';
+        console.log('Voice recognition started');
       };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-        if (blob.size < 1000) return; // 太短忽略
-        setIsListening(false);
-        try {
-          const res = await fetch('/api/voice', { method: 'POST', body: blob });
-          const data = await res.json();
-          if (data.text) handleVoiceResult(data.text);
-        } catch (e) {
-          console.error('Voice upload failed', e);
+
+      recognition.onresult = (event: any) => {
+        let interimTranscript = '';
+        let finalTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + ' ';
+          } else {
+            interimTranscript += transcript;
+          }
+        }
+
+        // Store interim results for display (optional)
+        interimTranscriptRef.current = interimTranscript;
+
+        // Process final results
+        if (finalTranscript) {
+          handleVoiceResult(finalTranscript.trim());
         }
       };
-      mediaRecorderRef.current = recorder;
-      recorder.start();
-      setIsListening(true);
+
+      recognition.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        console.log('Voice recognition ended');
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
     } catch (e) {
-      console.error('Mic access failed', e);
+      console.error('Failed to start speech recognition:', e);
+      setIsListening(false);
     }
   };
 
   const stopVoiceRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
     }
   };
 
@@ -214,16 +263,52 @@ const App: React.FC = () => {
 
   // --- Actions ---
 
+  const handleSelectHistory = (command: string) => {
+    setPromptText(command);
+    setShowHistory(false);
+    setHistoryIndex(-1);
+    setTempDraft(command);
+    setTimeout(() => textareaRef.current?.focus(), 50);
+  };
+
+  const handleDeleteHistory = (e: React.MouseEvent, index: number) => {
+    e.stopPropagation();
+    setSettings(prev => ({
+      ...prev,
+      commandHistory: prev.commandHistory.filter((_, idx) => idx !== index)
+    }));
+  };
+
+  const handleClearAllHistory = () => {
+    setSettings(prev => ({
+      ...prev,
+      commandHistory: []
+    }));
+  };
+
   const handleSendPrompt = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!promptText.trim()) return;
 
     const command = promptText;
+    
+    // Add to history in settings
+    setSettings(prev => {
+      const currentHistory = prev.commandHistory || [];
+      const newHistory = [command, ...currentHistory.filter(cmd => cmd !== command)].slice(0, 50);
+      return { ...prev, commandHistory: newHistory };
+    });
+    setHistoryIndex(-1);
+    setTempDraft('');
+    
     setPromptText(''); 
     setIsSending(true);
+    setSendSuccess(false);
 
     try {
       await sendCommandToVnc(command, activeProfile?.type, activeProfile?.tmuxTarget, activeProfile?.display);
+      setSendSuccess(true);
+      setTimeout(() => setSendSuccess(false), 2000);
     } catch (error) {
       console.error("Failed to send command", error);
     } finally {
@@ -374,7 +459,7 @@ const App: React.FC = () => {
               >
                 {settings.profiles.map(p => (
                   <option key={p.id} value={p.id} className="bg-gray-900 text-white">
-                    {p.name} {p.type === 'ttyd' ? '🖥' : '🖵'}
+                    {p.name}
                   </option>
                 ))}
               </select>
@@ -388,6 +473,19 @@ const App: React.FC = () => {
             onClose={() => setSettings(prev => ({ ...prev, showPrompt: false }))}
             headerActions={
                 <>
+                    {/* History Button */}
+                    <button
+                        onClick={() => setShowHistory(!showHistory)}
+                        className={`p-2 rounded-lg transition-all ${
+                            showHistory
+                                ? 'bg-blue-600 text-white'
+                                : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+                        }`}
+                        title="Command History"
+                    >
+                        <History size={18} />
+                    </button>
+
                     {/* Toggle Voice Control (Minimizes Prompt) */}
                     <button
                         onClick={toggleVoiceMode}
@@ -426,30 +524,126 @@ const App: React.FC = () => {
             }
           >
             <form onSubmit={handleSendPrompt} className="relative h-full flex flex-col p-4">
-              <textarea
-                ref={textareaRef}
-                value={promptText}
-                onChange={(e) => setPromptText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    handleSendPrompt();
-                  }
-                }}
-                placeholder="Type a command to send to VNC..."
-                className="flex-1 w-full bg-black/50 text-white rounded-lg border border-gray-700 p-3 pr-16 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none text-base shadow-inner"
-                disabled={isSending}
-              />
-              
-              <div className="absolute bottom-6 right-6 flex gap-2">
-                {/* Send Button */}
-                <button
-                    type="submit"
-                    disabled={!promptText.trim() || isSending}
-                    className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-                >
-                    <Send size={16} />
-                </button>
+              <div className="flex-1 flex flex-col min-h-0">
+                <textarea
+                  ref={textareaRef}
+                  value={promptText}
+                  onChange={(e) => {
+                    setPromptText(e.target.value);
+                    if (historyIndex === -1) {
+                      setTempDraft(e.target.value);
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      handleSendPrompt();
+                    }
+                    else if (e.key === 'ArrowUp') {
+                      const textarea = e.currentTarget;
+                      const cursorPos = textarea.selectionStart;
+                      const textBeforeCursor = textarea.value.substring(0, cursorPos);
+                      const isOnFirstLine = !textBeforeCursor.includes('\n');
+                      
+                      if (isOnFirstLine) {
+                        e.preventDefault();
+                        const history = settings.commandHistory || [];
+                        if (history.length > 0) {
+                          if (historyIndex === -1) {
+                            setTempDraft(promptText);
+                            setHistoryIndex(0);
+                            setPromptText(history[0]);
+                          } else if (historyIndex < history.length - 1) {
+                            const newIndex = historyIndex + 1;
+                            setHistoryIndex(newIndex);
+                            setPromptText(history[newIndex]);
+                          }
+                        }
+                      }
+                    }
+                    else if (e.key === 'ArrowDown') {
+                      const textarea = e.currentTarget;
+                      const cursorPos = textarea.selectionStart;
+                      const textAfterCursor = textarea.value.substring(cursorPos);
+                      const isOnLastLine = !textAfterCursor.includes('\n');
+                      
+                      if (isOnLastLine) {
+                        e.preventDefault();
+                        if (historyIndex > 0) {
+                          const newIndex = historyIndex - 1;
+                          setHistoryIndex(newIndex);
+                          setPromptText(settings.commandHistory[newIndex]);
+                        } else if (historyIndex === 0) {
+                          setHistoryIndex(-1);
+                          setPromptText(tempDraft);
+                        }
+                      }
+                    }
+                  }}
+                  placeholder="Type command..."
+                  className="w-full bg-black/50 text-white rounded-lg border border-gray-700 p-3 pr-16 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none text-base shadow-inner placeholder:text-gray-600 placeholder:opacity-50"
+                  style={{ height: showHistory ? '80px' : '100%' }}
+                  disabled={isSending}
+                />
+                
+                <div className="absolute bottom-6 right-6 flex gap-2">
+                  <button
+                      type="submit"
+                      disabled={!promptText.trim() || isSending}
+                      className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                  >
+                      {isSending ? (
+                          <Loader2 size={16} className="animate-spin" />
+                      ) : sendSuccess ? (
+                          <CheckCircle size={16} className="text-green-400" />
+                      ) : (
+                          <Send size={16} />
+                      )}
+                  </button>
+                </div>
+
+                {/* History List View */}
+                {showHistory && (
+                  <div className="mt-2 flex-1 overflow-y-auto bg-black/30 rounded-lg border border-gray-700 flex flex-col">
+                    {settings.commandHistory && settings.commandHistory.length > 0 ? (
+                      <>
+                        <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700 bg-gray-900/50">
+                          <span className="text-xs text-gray-400">Command History</span>
+                          <button
+                            onClick={handleClearAllHistory}
+                            className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                          >
+                            Clear All
+                          </button>
+                        </div>
+                        <div className="divide-y divide-gray-800 overflow-y-auto">
+                          {settings.commandHistory.map((cmd, idx) => (
+                            <div
+                              key={idx}
+                              onClick={() => handleSelectHistory(cmd)}
+                              className="px-3 py-2 hover:bg-gray-800 cursor-pointer text-gray-300 hover:text-white transition-colors group"
+                            >
+                              <div className="flex items-center gap-2">
+                                <History size={12} className="text-gray-500 flex-shrink-0" />
+                                <span className="truncate text-sm flex-1">{cmd}</span>
+                                <button
+                                  onClick={(e) => handleDeleteHistory(e, idx)}
+                                  className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity"
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="px-4 py-3 text-gray-500 text-center text-sm">
+                        No command history yet
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </form>
           </FloatingPanel>
@@ -465,6 +659,8 @@ const App: React.FC = () => {
                 stopVoiceRecording();
             }}
             isRecordingExternal={isListening && voiceModeRef.current === 'direct'}
+            isSending={isSending}
+            sendSuccess={sendSuccess}
           />
       )}
 

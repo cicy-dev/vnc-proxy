@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mic, Move } from 'lucide-react';
+import { Mic, Move, Loader2, CheckCircle } from 'lucide-react';
 import { Position } from '../types';
 
 interface VoiceFloatingButtonProps {
@@ -8,6 +8,8 @@ interface VoiceFloatingButtonProps {
   onRecordStart: () => void;
   onRecordEnd: (shouldSend: boolean) => void;
   isRecordingExternal: boolean;
+  isSending?: boolean;
+  sendSuccess?: boolean;
 }
 
 export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
@@ -15,7 +17,9 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
   onPositionChange,
   onRecordStart,
   onRecordEnd,
-  isRecordingExternal
+  isRecordingExternal,
+  isSending = false,
+  sendSuccess = false
 }) => {
   const [position, setPosition] = useState<Position>(initialPosition);
   const [isDragging, setIsDragging] = useState(false);
@@ -146,6 +150,10 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
           className={`relative z-10 w-24 h-24 rounded-full flex items-center justify-center shadow-2xl backdrop-blur-md border border-white/10 transition-all duration-300 ease-out ${
             dragMode 
               ? 'bg-blue-600/80 scale-90 cursor-move' 
+              : sendSuccess
+                ? 'bg-green-600 shadow-[0_0_50px_rgba(34,197,94,0.6)] scale-110 ring-4 ring-white/20'
+              : isSending
+                ? 'bg-yellow-600 shadow-[0_0_50px_rgba(234,179,8,0.6)] scale-110 ring-4 ring-white/20'
               : isPressed 
                 ? 'bg-red-600 shadow-[0_0_50px_rgba(220,38,38,0.6)] scale-110 ring-4 ring-white/20' 
                 : 'bg-gray-800/90 hover:bg-gray-700/90 cursor-pointer scale-100'
@@ -153,6 +161,10 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
         >
           {dragMode ? (
               <Move size={32} className="text-white" />
+          ) : sendSuccess ? (
+              <CheckCircle size={40} className="text-white" />
+          ) : isSending ? (
+              <Loader2 size={40} className="text-white animate-spin" />
           ) : (
               <Mic size={40} className={`transition-all duration-200 ${isPressed ? 'text-white scale-110' : 'text-gray-300'}`} />
           )}
@@ -160,8 +172,8 @@ export const VoiceFloatingButton: React.FC<VoiceFloatingButtonProps> = ({
       </div>
 
       {/* Label/Hint */}
-      <div className={`absolute -bottom-10 left-1/2 -translate-x-1/2 text-sm font-bold whitespace-nowrap px-3 py-1.5 rounded-full bg-black/70 text-white backdrop-blur-sm transition-opacity duration-200 ${isPressed ? 'opacity-100' : 'opacity-0'}`}>
-        {dragMode ? "Positioning..." : "Recording..."}
+      <div className={`absolute -bottom-10 left-1/2 -translate-x-1/2 text-sm font-bold whitespace-nowrap px-3 py-1.5 rounded-full bg-black/70 text-white backdrop-blur-sm transition-opacity duration-200 ${isPressed || isSending || sendSuccess ? 'opacity-100' : 'opacity-0'}`}>
+        {dragMode ? "Positioning..." : sendSuccess ? "Sent!" : isSending ? "Sending..." : "Recording..."}
       </div>
     </div>
   );
