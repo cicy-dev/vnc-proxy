@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Send, Settings, Wifi, WifiOff, X, Plus, Trash2, Edit2, Keyboard, Check, Mic, MicOff, Terminal, MessageSquare, Maximize, Loader2, CheckCircle, History } from 'lucide-react';
+import { Send, Settings, Wifi, WifiOff, X, Plus, Trash2, Edit2, Keyboard, Check, Mic, MicOff, Terminal, MessageSquare, Maximize, Loader2, CheckCircle, History, Menu, Sparkles } from 'lucide-react';
 import { VncFrame } from './components/VncFrame';
 import { FloatingPanel } from './components/FloatingPanel';
 import { VoiceFloatingButton } from './components/VoiceFloatingButton';
+import { LoginForm } from './components/LoginForm';
 import { sendCommandToVnc, sendSystemEvent, sendShortcut } from './services/mockApi';
 import { AppSettings, VncProfile, Position, Size } from './types';
 
@@ -10,7 +11,7 @@ import { AppSettings, VncProfile, Position, Size } from './types';
 const DEFAULT_PROFILE: VncProfile = {
   id: 'default',
   name: 'VNC :1',
-  url: '/vnc/vnc.html?autoconnect=true&resize=scale&path=vnc/websockify',
+  url: 'https://g-6080.cicy.de5.net/vnc.html?autoconnect=true&resize=scale',
   display: ':1'
 };
 
@@ -27,7 +28,7 @@ const DEFAULT_TTYD_PROFILES: VncProfile[] = [];
 
 const DEFAULT_SETTINGS: AppSettings = {
   panelPosition: { x: 20, y: 20 },
-  panelSize: { width: 450, height: 188 },
+  panelSize: { width: 450, height: 120 },
   profiles: [DEFAULT_PROFILE, VNC2_PROFILE],
   activeProfileId: 'default',
   forwardEvents: false,
@@ -53,6 +54,8 @@ const App: React.FC = () => {
   // --- State Management ---
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
   
   // UI State
   const [isInteracting, setIsInteracting] = useState(false);
@@ -60,7 +63,14 @@ const App: React.FC = () => {
   const [isSending, setIsSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
+  const [correctedText, setCorrectedText] = useState('');
+  const [isCorrectingEnglish, setIsCorrectingEnglish] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  
+  // Network Status
+  const [networkLatency, setNetworkLatency] = useState<number | null>(null);
+  const [networkStatus, setNetworkStatus] = useState<'excellent' | 'good' | 'poor' | 'offline'>('good');
   
   // Command History
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -82,17 +92,40 @@ const App: React.FC = () => {
   
   useEffect(() => {
     const init = async () => {
-      // 加载 localStorage
+      // Check for token first
+      const savedToken = localStorage.getItem('token');
+      if (savedToken) {
+        // Verify token is still valid
+        try {
+          const res = await fetch('/api/type', {
+            method: 'POST',
+            headers: { 
+              'Authorization': `Bearer ${savedToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ text: '', display: ':1' })
+          });
+          if (res.ok || res.status === 200) {
+            setToken(savedToken);
+          } else {
+            localStorage.removeItem('token');
+          }
+        } catch (e) {
+          console.error('Token verification failed', e);
+          localStorage.removeItem('token');
+        }
+      }
+      setIsCheckingAuth(false);
+
+      // Load settings
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          // 强制使用最新的默认 profiles
           parsed.profiles = [DEFAULT_PROFILE, VNC2_PROFILE];
           if (!parsed.activeProfileId || !parsed.profiles.find((p: any) => p.id === parsed.activeProfileId)) {
             parsed.activeProfileId = 'default';
           }
-          // Ensure commandHistory exists
           if (!parsed.commandHistory) {
             parsed.commandHistory = [];
           }
@@ -125,6 +158,51 @@ const App: React.FC = () => {
     return () => clearTimeout(timeoutId);
   }, [promptText, isLoaded]);
 
+  // Network Health Check
+  useEffect(() => {
+    const checkHealth = async () => {
+      const startTime = performance.now();
+      try {
+        const response = await fetch('/api/health', {
+          method: 'GET',
+          cache: 'no-cache'
+        });
+        const endTime = performance.now();
+        const latency = Math.round(endTime - startTime);
+        
+        if (response.ok) {
+          setNetworkLatency(latency);
+          // Determine status based on latency
+          if (latency < 100) {
+            setNetworkStatus('excellent');
+          } else if (latency < 300) {
+            setNetworkStatus('good');
+          } else {
+            setNetworkStatus('poor');
+          }
+        } else {
+          setNetworkStatus('offline');
+          setNetworkLatency(null);
+        }
+      } catch (error) {
+        setNetworkStatus('offline');
+        setNetworkLatency(null);
+      }
+    };
+
+    // Check immediately
+    checkHealth();
+    
+    // Check every 5 seconds
+    const interval = setInterval(checkHealth, 5000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleLogin = (newToken: string) => {
+    setToken(newToken);
+  };
+
   // --- Derived State (must be before hooks that use it) ---
   const activeProfile = settings.profiles.find(p => p.id === settings.activeProfileId) || settings.profiles[0];
 
@@ -156,6 +234,51 @@ const App: React.FC = () => {
         }
     }
   }, [activeProfile]);
+
+  // --- English Correction Logic ---
+  const handleCorrectEnglish = async () => {
+    if (!promptText.trim() || isCorrectingEnglish) return;
+    
+    setIsCorrectingEnglish(true);
+    setCorrectedText('');
+    
+    try {
+      const response = await fetch('/api/correctEnglish', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ text: promptText })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success && data.correctedText) {
+        setCorrectedText(data.correctedText);
+      } else {
+        console.error('English correction failed:', data.error);
+        alert('Failed to correct English: ' + (data.error || 'Unknown error'));
+      }
+    } catch (error) {
+      console.error('English correction error:', error);
+      alert('Failed to correct English. Please check your connection.');
+    } finally {
+      setIsCorrectingEnglish(false);
+    }
+  };
+
+  const handleAcceptCorrection = () => {
+    if (correctedText) {
+      setPromptText(correctedText);
+      setCorrectedText('');
+      setTimeout(() => textareaRef.current?.focus(), 50);
+    }
+  };
+
+  const handleDismissCorrection = () => {
+    setCorrectedText('');
+  };
 
   const startVoiceRecording = async (mode: 'append' | 'direct') => {
     voiceModeRef.current = mode;
@@ -412,16 +535,35 @@ const App: React.FC = () => {
   // Profile selector dropdown
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
+  // Show loading screen while checking auth
+  if (isCheckingAuth) {
+    return <div className="bg-black w-screen h-screen flex items-center justify-center">
+      <Loader2 size={48} className="text-blue-500 animate-spin" />
+    </div>;
+  }
+
+  // Show login form if not authenticated
+  if (!token) {
+    return <LoginForm onLogin={handleLogin} />;
+  }
+
   if (!isLoaded) return <div className="bg-black w-screen h-screen"></div>;
 
   return (
     <div className="relative w-screen h-screen bg-black overflow-hidden font-sans">
       {/* Full Screen Iframes - display:none 隐藏非活跃的 */}
-      <VncFrame 
-        profiles={settings.profiles}
-        activeProfileId={settings.activeProfileId}
-        isInteractingWithOverlay={isInteracting} 
-      />
+      <div 
+        className="absolute inset-0 transition-all duration-300"
+        style={{ 
+          right: showSidebar ? '320px' : '0'
+        }}
+      >
+        <VncFrame 
+          profiles={settings.profiles}
+          activeProfileId={settings.activeProfileId}
+          isInteractingWithOverlay={isInteracting} 
+        />
+      </div>
 
       {/* Minimized Toggle Button (Visible when prompt is hidden) */}
       {!settings.showPrompt && (
@@ -466,13 +608,48 @@ const App: React.FC = () => {
             }
             initialPosition={settings.panelPosition}
             initialSize={settings.panelSize}
-            minSize={{ width: 340, height: 180 }}
+            minSize={{ width: 340, height: 120 }}
             onInteractionStart={() => setIsInteracting(true)}
             onInteractionEnd={() => setIsInteracting(false)}
             onChange={handlePanelChange}
             onClose={() => setSettings(prev => ({ ...prev, showPrompt: false }))}
             headerActions={
                 <>
+                    {/* Network Status Indicator */}
+                    <div 
+                        className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gray-800/50"
+                        title={networkLatency !== null ? `Latency: ${networkLatency}ms` : 'Offline'}
+                    >
+                        {networkStatus === 'excellent' && (
+                            <Wifi size={16} className="text-green-400" />
+                        )}
+                        {networkStatus === 'good' && (
+                            <Wifi size={16} className="text-yellow-400" />
+                        )}
+                        {networkStatus === 'poor' && (
+                            <Wifi size={16} className="text-orange-400" />
+                        )}
+                        {networkStatus === 'offline' && (
+                            <WifiOff size={16} className="text-red-400" />
+                        )}
+                        <span className="text-xs text-gray-400 font-mono">
+                            {networkLatency !== null ? `${networkLatency}ms` : 'offline'}
+                        </span>
+                    </div>
+
+                    {/* Menu Button */}
+                    <button
+                        onClick={() => setShowSidebar(!showSidebar)}
+                        className={`p-2 rounded-lg transition-all ${
+                            showSidebar
+                                ? 'bg-blue-600 text-white'
+                                : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+                        }`}
+                        title="VNC Menu"
+                    >
+                        <Menu size={18} />
+                    </button>
+
                     {/* History Button */}
                     <button
                         onClick={() => setShowHistory(!showHistory)}
@@ -523,84 +700,130 @@ const App: React.FC = () => {
                 </>
             }
           >
-            <form onSubmit={handleSendPrompt} className="relative h-full flex flex-col p-4">
+            <form onSubmit={handleSendPrompt} className="relative h-full flex flex-col p-2">
               <div className="flex-1 flex flex-col min-h-0">
-                <textarea
-                  ref={textareaRef}
-                  value={promptText}
-                  onChange={(e) => {
-                    setPromptText(e.target.value);
-                    if (historyIndex === -1) {
-                      setTempDraft(e.target.value);
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                      e.preventDefault();
-                      handleSendPrompt();
-                    }
-                    else if (e.key === 'ArrowUp') {
-                      const textarea = e.currentTarget;
-                      const cursorPos = textarea.selectionStart;
-                      const textBeforeCursor = textarea.value.substring(0, cursorPos);
-                      const isOnFirstLine = !textBeforeCursor.includes('\n');
-                      
-                      if (isOnFirstLine) {
+                {/* Textarea wrapper with relative positioning */}
+                <div className="relative">
+                  <textarea
+                    ref={textareaRef}
+                    value={promptText}
+                    onChange={(e) => {
+                      setPromptText(e.target.value);
+                      if (historyIndex === -1) {
+                        setTempDraft(e.target.value);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                         e.preventDefault();
-                        const history = settings.commandHistory || [];
-                        if (history.length > 0) {
-                          if (historyIndex === -1) {
-                            setTempDraft(promptText);
-                            setHistoryIndex(0);
-                            setPromptText(history[0]);
-                          } else if (historyIndex < history.length - 1) {
-                            const newIndex = historyIndex + 1;
-                            setHistoryIndex(newIndex);
-                            setPromptText(history[newIndex]);
+                        handleSendPrompt();
+                      }
+                      else if (e.key === 'ArrowUp') {
+                        const textarea = e.currentTarget;
+                        const cursorPos = textarea.selectionStart;
+                        const textBeforeCursor = textarea.value.substring(0, cursorPos);
+                        const isOnFirstLine = !textBeforeCursor.includes('\n');
+                        
+                        if (isOnFirstLine) {
+                          e.preventDefault();
+                          const history = settings.commandHistory || [];
+                          if (history.length > 0) {
+                            if (historyIndex === -1) {
+                              setTempDraft(promptText);
+                              setHistoryIndex(0);
+                              setPromptText(history[0]);
+                            } else if (historyIndex < history.length - 1) {
+                              const newIndex = historyIndex + 1;
+                              setHistoryIndex(newIndex);
+                              setPromptText(history[newIndex]);
+                            }
                           }
                         }
                       }
-                    }
-                    else if (e.key === 'ArrowDown') {
-                      const textarea = e.currentTarget;
-                      const cursorPos = textarea.selectionStart;
-                      const textAfterCursor = textarea.value.substring(cursorPos);
-                      const isOnLastLine = !textAfterCursor.includes('\n');
-                      
-                      if (isOnLastLine) {
-                        e.preventDefault();
-                        if (historyIndex > 0) {
-                          const newIndex = historyIndex - 1;
-                          setHistoryIndex(newIndex);
-                          setPromptText(settings.commandHistory[newIndex]);
-                        } else if (historyIndex === 0) {
-                          setHistoryIndex(-1);
-                          setPromptText(tempDraft);
+                      else if (e.key === 'ArrowDown') {
+                        const textarea = e.currentTarget;
+                        const cursorPos = textarea.selectionStart;
+                        const textAfterCursor = textarea.value.substring(cursorPos);
+                        const isOnLastLine = !textAfterCursor.includes('\n');
+                        
+                        if (isOnLastLine) {
+                          e.preventDefault();
+                          if (historyIndex > 0) {
+                            const newIndex = historyIndex - 1;
+                            setHistoryIndex(newIndex);
+                            setPromptText(settings.commandHistory[newIndex]);
+                          } else if (historyIndex === 0) {
+                            setHistoryIndex(-1);
+                            setPromptText(tempDraft);
+                          }
                         }
                       }
-                    }
-                  }}
-                  placeholder="Type command..."
-                  className="w-full bg-black/50 text-white rounded-lg border border-gray-700 p-3 pr-16 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none text-base shadow-inner placeholder:text-gray-600 placeholder:opacity-50"
-                  style={{ height: showHistory ? '80px' : '100%' }}
-                  disabled={isSending}
-                />
-                
-                <div className="absolute bottom-6 right-6 flex gap-2">
-                  <button
-                      type="submit"
-                      disabled={!promptText.trim() || isSending}
-                      className="p-2 bg-blue-600 hover:bg-blue-500 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-                  >
-                      {isSending ? (
-                          <Loader2 size={16} className="animate-spin" />
-                      ) : sendSuccess ? (
-                          <CheckCircle size={16} className="text-green-400" />
-                      ) : (
-                          <Send size={16} />
-                      )}
-                  </button>
+                    }}
+                    rows={2}
+                    placeholder="Type command..."
+                    className="w-full bg-black/50 text-white rounded-lg border border-gray-700 p-2 pr-2 pb-10 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none text-sm shadow-inner placeholder:text-gray-600 placeholder:opacity-50"
+                    disabled={isSending}
+                  />
+                  
+                  {/* Button group at bottom-right corner of textarea */}
+                  <div className="absolute bottom-3 right-2 flex gap-1">
+                    {/* English Correction Button */}
+                    <button
+                        type="button"
+                        onClick={handleCorrectEnglish}
+                        disabled={!promptText.trim() || isCorrectingEnglish}
+                        className="p-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                        title="Correct English with AI"
+                    >
+                        {isCorrectingEnglish ? (
+                            <Loader2 size={14} className="animate-spin" />
+                        ) : (
+                            <Sparkles size={14} />
+                        )}
+                    </button>
+                    
+                    {/* Send button */}
+                    <button
+                        type="submit"
+                        disabled={!promptText.trim() || isSending}
+                        className="p-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+                    >
+                        {isSending ? (
+                            <Loader2 size={14} className="animate-spin" />
+                        ) : sendSuccess ? (
+                            <CheckCircle size={14} className="text-green-400" />
+                        ) : (
+                            <Send size={14} />
+                        )}
+                    </button>
+                  </div>
                 </div>
+
+                {/* Corrected Text Display */}
+                {correctedText && (
+                  <div className="mt-2 p-3 bg-purple-900/30 border border-purple-700 rounded-lg">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <Sparkles size={14} className="text-purple-400 flex-shrink-0" />
+                        <span className="text-xs text-purple-300 font-medium">Corrected Text:</span>
+                      </div>
+                      <button
+                        onClick={handleDismissCorrection}
+                        className="text-gray-400 hover:text-white transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                    <p className="text-sm text-white mb-3 whitespace-pre-wrap">{correctedText}</p>
+                    <button
+                      onClick={handleAcceptCorrection}
+                      className="w-full px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm rounded-md transition-colors flex items-center justify-center gap-2"
+                    >
+                      <Check size={14} />
+                      Use This Text
+                    </button>
+                  </div>
+                )}
 
                 {/* History List View */}
                 {showHistory && (
@@ -662,6 +885,66 @@ const App: React.FC = () => {
             isSending={isSending}
             sendSuccess={sendSuccess}
           />
+      )}
+
+      {/* Sidebar Menu */}
+      {showSidebar && (
+        <div className="fixed right-0 top-0 h-full w-80 bg-gray-900 border-l border-gray-700 shadow-2xl flex flex-col z-[90]">
+          {/* Header */}
+          <div className="flex items-center justify-between p-4 border-b border-gray-800">
+            <h2 className="text-lg font-bold text-white">VNC Profiles</h2>
+            <button 
+              onClick={() => setShowSidebar(false)}
+              className="p-2 hover:bg-gray-800 rounded-lg text-gray-400 hover:text-white transition-colors"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* VNC List */}
+          <div className="flex-1 overflow-y-auto p-4">
+            <div className="space-y-2">
+              {settings.profiles.map(profile => (
+                <button
+                  key={profile.id}
+                  onClick={() => {
+                    handleSelectProfile(profile.id);
+                  }}
+                  className={`w-full text-left p-4 rounded-lg transition-all ${
+                    settings.activeProfileId === profile.id
+                      ? 'bg-blue-600 text-white shadow-lg'
+                      : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="font-medium">{profile.name}</div>
+                      <div className="text-xs opacity-70 mt-1 truncate">
+                        {profile.type === 'ttyd' ? '🖥️ Terminal' : '🖵 VNC'} • {profile.display || 'N/A'}
+                      </div>
+                    </div>
+                    {settings.activeProfileId === profile.id && (
+                      <Check size={20} className="flex-shrink-0 ml-2" />
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Footer Actions */}
+          <div className="p-4 border-t border-gray-800">
+            <button
+              onClick={() => {
+                setShowSettings(true);
+              }}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
+            >
+              <Settings size={18} />
+              <span>Manage Profiles</span>
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Settings Modal - Reusing previous robust implementation */}
