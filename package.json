@@ -1,27 +1,17 @@
 {
-  "name": "vnc-command-overlay",
+  "name": "vnc-proxy",
+  "version": "1.0.0",
   "private": true,
-  "version": "0.0.0",
-  "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "server": "node server/index.cjs",
-    "start": "node server/index.cjs"
-  },
-  "dependencies": {
-    "express": "^5.2.1",
-    "http-proxy": "^1.18.1",
-    "http-proxy-middleware": "^3.0.5",
-    "lucide-react": "^0.564.0",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "dev:server": "cd server && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev": "npm run dev:server & npm run dev:frontend",
+    "build": "cd frontend && npm run build",
+    "start": "cd server && npm run start",
+    "docker:dev": "docker-compose -f docker-compose.dev.yml up",
+    "docker:dev:build": "docker-compose -f docker-compose.dev.yml build"
   },
   "devDependencies": {
-    "@types/node": "^22.14.0",
-    "@vitejs/plugin-react": "^5.0.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "docker-compose": "^1.29.2"
   }
 }

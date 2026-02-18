@@ -1,0 +1,42 @@
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./server/src:/app/src:ro
+      - ./server/package.json:/app/package.json:ro
+      - /app/node_modules
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ~/personal:/root/personal:ro
+    environment:
+      - NODE_ENV=development
+      - PORT=13446
+      - CHOKIDAR_USEPOLLING=true
+    ports:
+      - "13446:13446"
+    command: npx tsx watch src/index.ts
+    restart: unless-stopped
+    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - CHOKIDAR_USEPOLLING=true
+      - VITE_API_URL=http://localhost:13446
+    ports:
+      - "13447:13447"
+    depends_on:
+      - server
+    command: npm run dev
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

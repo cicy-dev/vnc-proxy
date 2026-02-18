@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Send, Settings, Wifi, WifiOff, X, Plus, Trash2, Edit2, Keyboard, Check, Mic, MicOff, Terminal, MessageSquare, Maximize, Loader2, CheckCircle, History, Menu, Sparkles } from 'lucide-react';
-import { VncFrame } from './components/VncFrame';
+import { DraggableVncFrame } from './components/DraggableVncFrame';
 import { FloatingPanel } from './components/FloatingPanel';
 import { VoiceFloatingButton } from './components/VoiceFloatingButton';
 import { LoginForm } from './components/LoginForm';
@@ -558,7 +558,7 @@ const App: React.FC = () => {
           right: showSidebar ? '320px' : '0'
         }}
       >
-        <VncFrame 
+        <DraggableVncFrame 
           profiles={settings.profiles}
           activeProfileId={settings.activeProfileId}
           isInteractingWithOverlay={isInteracting} 
@@ -637,65 +637,18 @@ const App: React.FC = () => {
                         </span>
                     </div>
 
-                    {/* Menu Button */}
+                    {/* Correct English Button */}
                     <button
-                        onClick={() => setShowSidebar(!showSidebar)}
-                        className={`p-2 rounded-lg transition-all ${
-                            showSidebar
-                                ? 'bg-blue-600 text-white'
-                                : 'text-gray-400 hover:bg-gray-700 hover:text-white'
-                        }`}
-                        title="VNC Menu"
+                        onClick={handleCorrectEnglish}
+                        disabled={!promptText.trim() || isCorrectingEnglish}
+                        className="p-1.5 rounded-lg text-purple-400 hover:bg-purple-600/20 transition-colors disabled:opacity-50"
+                        title="Correct English with AI"
                     >
-                        <Menu size={18} />
-                    </button>
-
-                    {/* History Button */}
-                    <button
-                        onClick={() => setShowHistory(!showHistory)}
-                        className={`p-2 rounded-lg transition-all ${
-                            showHistory
-                                ? 'bg-blue-600 text-white'
-                                : 'text-gray-400 hover:bg-gray-700 hover:text-white'
-                        }`}
-                        title="Command History"
-                    >
-                        <History size={18} />
-                    </button>
-
-                    {/* Toggle Voice Control (Minimizes Prompt) */}
-                    <button
-                        onClick={toggleVoiceMode}
-                        className={`p-2 rounded-lg transition-all ${
-                            settings.showVoiceControl
-                                ? 'bg-red-600 text-white'
-                                : 'text-gray-400 hover:bg-gray-700 hover:text-white'
-                        }`}
-                        title="Switch to Voice Mode"
-                    >
-                        <Mic size={18} />
-                    </button>
-
-                    {/* Event Forwarding Toggle */}
-                    <button 
-                        onClick={toggleEventForwarding}
-                        className={`p-2 rounded-lg transition-all flex items-center gap-2 ${
-                            settings.forwardEvents 
-                            ? 'bg-green-600 text-white' 
-                            : 'text-gray-400 hover:bg-gray-700 hover:text-white'
-                        }`}
-                        title={settings.forwardEvents ? "Event Forwarding Active" : "Enable Event Forwarding"}
-                    >
-                        <Keyboard size={18} />
-                    </button>
-
-                    {/* Settings Button */}
-                    <button 
-                        onClick={() => setShowSettings(true)}
-                        className="p-2 rounded-lg text-gray-400 hover:bg-gray-700 hover:text-white transition-colors"
-                        title="Connection Settings"
-                    >
-                        <Settings size={18} />
+                        {isCorrectingEnglish ? (
+                            <Loader2 size={16} className="animate-spin" />
+                        ) : (
+                            <Sparkles size={16} />
+                        )}
                     </button>
                 </>
             }

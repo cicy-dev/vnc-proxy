@@ -6,13 +6,13 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       server: {
-        port: 13334,
+        port: 13447,
         host: '0.0.0.0',
-        allowedHosts: ['g-13334.cicy.de5.net'],
+        allowedHosts: true,
         proxy: {
-          '/api': 'http://127.0.0.1:13335',
-          '/vnc': { target: 'http://127.0.0.1:13335', ws: true },
-          '/ttyd': { target: 'http://127.0.0.1:13335', ws: true },
+          '/api': 'http://host.docker.internal:13446',
+          '/vnc': { target: 'http://host.docker.internal:13446', ws: true },
+          '/ttyd': { target: 'http://host.docker.internal:13446', ws: true },
         },
       },
       plugins: [react()],
