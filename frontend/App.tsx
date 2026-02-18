@@ -11,14 +11,14 @@ import { AppSettings, VncProfile, Position, Size } from './types';
 const DEFAULT_PROFILE: VncProfile = {
   id: 'default',
   name: 'VNC :1',
-  url: 'https://g-6080.cicy.de5.net/vnc.html?autoconnect=true&resize=scale',
+  url: 'https://g-6080.cicy.de5.net/vnc.html?autoconnect=true',
   display: ':1'
 };
 
 const VNC2_PROFILE: VncProfile = {
   id: 'vnc2',
   name: 'VNC :2',
-  url: 'https://g-6082.cicy.de5.net/vnc.html?autoconnect=true&resize=scale',
+  url: 'https://g-6082.cicy.de5.net/vnc.html?autoconnect=true',
   display: ':2'
 };
 
