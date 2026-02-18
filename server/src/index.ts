@@ -114,9 +114,13 @@ const server = http.createServer((req, res) => {
         const { text } = text_data;
         if (!text || !text.trim()) return json(res, { success: false, error: 'no text' });
         const display = text_data.display || ':1';
-        execSync(`echo -n ${JSON.stringify(text)} | DISPLAY=${display} xsel --clipboard --input`, { timeout: 5000 });
-        execSync(`DISPLAY=${display} xdotool key ctrl+v`, { timeout: 5000 });
-        execSync(`DISPLAY=${display} xdotool key Return`, { timeout: 5000 });
+        console.log(`[type] Sending to display: ${display}, text: ${text}`);
+        execSync(`DISPLAY=${display} xdotool type -- "${text.replace(/"/g, '\\"')}"`, { timeout: 5000, stdio: 'ignore' });
+        execSync(`DISPLAY=${display} xdotool key Return`, { timeout: 5000, stdio: 'ignore' });
+        console.log(`[type] Done sending: ${text}`);
+        try {
+          execSync(`DISPLAY=${display} notify-send "VNC" "Sent: ${text.substring(0, 30)}"`, { timeout: 3000, stdio: 'ignore' });
+        } catch {}
         return json(res, { success: true });
       } catch (e: any) {
         return json(res, { success: false, error: e.message });

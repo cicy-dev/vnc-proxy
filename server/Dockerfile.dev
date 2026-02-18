@@ -2,6 +2,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
+RUN apk add --no-cache xclip xdotool
+
 RUN npm install -g tsx
 
 COPY package.json ./

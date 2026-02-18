@@ -63,7 +63,7 @@ const App: React.FC = () => {
   const [isSending, setIsSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [correctedText, setCorrectedText] = useState('');
   const [isCorrectingEnglish, setIsCorrectingEnglish] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -637,6 +637,19 @@ const App: React.FC = () => {
                         </span>
                     </div>
 
+                    {/* Voice Record Toggle - just highlight */}
+                    <button
+                        onClick={() => setSettings(prev => ({ ...prev, showVoiceControl: !prev.showVoiceControl }))}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                            settings.showVoiceControl 
+                            ? 'bg-red-600 text-white' 
+                            : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+                        }`}
+                        title={settings.showVoiceControl ? "Voice Active" : "Enable Voice"}
+                    >
+                        <Mic size={16} />
+                    </button>
+
                     {/* Correct English Button */}
                     <button
                         onClick={handleCorrectEnglish}
@@ -653,10 +666,10 @@ const App: React.FC = () => {
                 </>
             }
           >
-            <form onSubmit={handleSendPrompt} className="relative h-full flex flex-col p-2">
+            <form onSubmit={handleSendPrompt} className="relative h-full w-full flex flex-col p-3">
               <div className="flex-1 flex flex-col min-h-0">
                 {/* Textarea wrapper with relative positioning */}
-                <div className="relative">
+                <div className="relative h-full">
                   <textarea
                     ref={textareaRef}
                     value={promptText}
@@ -714,28 +727,12 @@ const App: React.FC = () => {
                     }}
                     rows={2}
                     placeholder="Type command..."
-                    className="w-full bg-black/50 text-white rounded-lg border border-gray-700 p-2 pr-2 pb-10 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none text-sm shadow-inner placeholder:text-gray-600 placeholder:opacity-50"
+                    className="w-full h-full bg-black/50 text-white rounded-lg border border-gray-700 p-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none text-sm shadow-inner placeholder:text-gray-600 placeholder:opacity-50"
                     disabled={isSending}
                   />
                   
-                  {/* Button group at bottom-right corner of textarea */}
-                  <div className="absolute bottom-3 right-2 flex gap-1">
-                    {/* English Correction Button */}
-                    <button
-                        type="button"
-                        onClick={handleCorrectEnglish}
-                        disabled={!promptText.trim() || isCorrectingEnglish}
-                        className="p-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-                        title="Correct English with AI"
-                    >
-                        {isCorrectingEnglish ? (
-                            <Loader2 size={14} className="animate-spin" />
-                        ) : (
-                            <Sparkles size={14} />
-                        )}
-                    </button>
-                    
-                    {/* Send button */}
+                  {/* Send button */}
+                  <div className="absolute bottom-2 right-2">
                     <button
                         type="submit"
                         disabled={!promptText.trim() || isSending}
@@ -825,19 +822,19 @@ const App: React.FC = () => {
           </FloatingPanel>
       )}
 
-      {/* Floating Voice Control Button */}
+      {/* Floating Voice Control Button - show/hide based on toggle */}
       {settings.showVoiceControl && (
-          <VoiceFloatingButton
-            initialPosition={settings.voiceButtonPosition}
-            onPositionChange={handleVoiceButtonPosChange}
-            onRecordStart={() => startVoiceRecording('direct')}
-            onRecordEnd={(shouldSend) => {
-                stopVoiceRecording();
-            }}
-            isRecordingExternal={isListening && voiceModeRef.current === 'direct'}
-            isSending={isSending}
-            sendSuccess={sendSuccess}
-          />
+        <VoiceFloatingButton
+          initialPosition={settings.voiceButtonPosition}
+          onPositionChange={handleVoiceButtonPosChange}
+          onRecordStart={() => startVoiceRecording('direct')}
+          onRecordEnd={(shouldSend) => {
+              stopVoiceRecording();
+          }}
+          isRecordingExternal={isListening && voiceModeRef.current === 'direct'}
+          isSending={isSending}
+          sendSuccess={sendSuccess}
+        />
       )}
 
       {/* Sidebar Menu */}
