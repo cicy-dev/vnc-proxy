@@ -108,19 +108,46 @@ const server = http.createServer((req, res) => {
   if (urlPath === '/api/type' && req.method === 'POST') {
     let body = '';
     req.on('data', (c: any) => body += c);
+    req.on('end', async () => {
+      try {
+        const { text, target } = JSON.parse(body);
+        if (!text || !text.trim() || !target) return json(res, { success: false, error: 'need text and target' });
+        console.log(`[type] Sending to display: ${target}, text: ${text}`);
+        
+        // 计算端口: :1 → 13431, :2 → 13432
+        const displayNum = parseInt(target.split(':')[1] || '1');
+        const proxyPort = 13430 + displayNum;
+        
+        // 调用 proxy (measure_window.py) on host
+        const proxyRes = await fetch(`http://10.170.0.6:${proxyPort}/api/type`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, target })
+        });
+        const proxyData = await proxyRes.json();
+        if (!proxyData.success) return json(res, { success: false, error: proxyData.error });
+        
+        console.log(`[type] Done: ${text}`);
+        return json(res, { success: true });
+      } catch (e: any) {
+        return json(res, { success: false, error: e.message });
+      }
+    });
+    return;
+  }
+
+  // 代理请求 - 不需要认证（内部使用）
+  if (urlPath === '/api/proxy-type' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (c: any) => body += c);
     req.on('end', () => {
       try {
-        const text_data = JSON.parse(body);
-        const { text } = text_data;
-        if (!text || !text.trim()) return json(res, { success: false, error: 'no text' });
-        const display = text_data.display || ':1';
-        console.log(`[type] Sending to display: ${display}, text: ${text}`);
-        execSync(`DISPLAY=${display} xdotool type -- "${text.replace(/"/g, '\\"')}"`, { timeout: 5000, stdio: 'ignore' });
-        execSync(`DISPLAY=${display} xdotool key Return`, { timeout: 5000, stdio: 'ignore' });
-        console.log(`[type] Done sending: ${text}`);
-        try {
-          execSync(`DISPLAY=${display} notify-send "VNC" "Sent: ${text.substring(0, 30)}"`, { timeout: 3000, stdio: 'ignore' });
-        } catch {}
+        const { text, target } = JSON.parse(body);
+        if (!text || !text.trim() || !target) return json(res, { success: false, error: 'need text and target' });
+        console.log(`[proxy-type] Sending to display: ${target}, text: ${text}`);
+        execSync(`DISPLAY=${target} xdotool type -- "${text.replace(/"/g, '\\"')}"`, { timeout: 5000, stdio: 'ignore' });
+        execSync(`DISPLAY=${target} xdotool key Return`, { timeout: 5000, stdio: 'ignore' });
+        console.log(`[proxy-type] Done: ${text}`);
         return json(res, { success: true });
       } catch (e: any) {
         return json(res, { success: false, error: e.message });

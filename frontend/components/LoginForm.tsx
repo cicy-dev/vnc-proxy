@@ -28,7 +28,7 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ text: '', display: ':1' })
+        body: JSON.stringify({ text: '', target: ':1' })
       });
 
       if (res.ok || res.status === 200) {

@@ -6,6 +6,10 @@ interface DraggableVncFrameProps {
   profiles: VncProfile[];
   activeProfileId: string | null;
   isInteractingWithOverlay: boolean;
+  initialPosition?: Position;
+  onSelectProfile?: (profileId: string) => void;
+  topProfileId?: string | null;
+  visible?: boolean;
 }
 
 const DEFAULT_SIZE: Size = { width: 1200, height: 800 };
@@ -21,12 +25,18 @@ export const DraggableVncFrame: React.FC<DraggableVncFrameProps> = ({
   profiles,
   activeProfileId,
   isInteractingWithOverlay,
+  initialPosition = { x: 20, y: 20 },
+  onSelectProfile,
+  topProfileId,
+  visible = true,
 }) => {
-  const [position, setPosition] = useState<Position>({ x: 20, y: 20 });
+  const [position, setPosition] = useState<Position>(initialPosition);
   const [size, setSize] = useState<Size>(DEFAULT_SIZE);
   const [isDragging, setIsDragging] = useState(false);
   const [panOffset, setPanOffset] = useState<Position>({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
+
+  const isOnTop = topProfileId ? topProfileId === activeProfileId : true;
 
   const windowRef = useRef<HTMLDivElement>(null);
   const dragStart = useRef<{ x: number; y: number; posX: number; posY: number }>({ x: 0, y: 0, posX: 20, posY: 20 });
@@ -120,39 +130,47 @@ export const DraggableVncFrame: React.FC<DraggableVncFrameProps> = ({
     <div
       ref={windowRef}
       className="absolute flex flex-col bg-black border border-gray-700 rounded-lg shadow-2xl overflow-hidden"
+      onClick={() => {
+        if (activeProfile) {
+          onSelectProfile?.(activeProfile.id);
+        }
+      }}
       style={{
         left: position.x,
         top: position.y,
         width: size.width,
         height: size.height,
-        zIndex: 95,
+        zIndex: isOnTop ? 95 : 1,
+        display: visible ? 'flex' : 'none',
       }}
-    >
-      <div
-        className="h-10 bg-gray-800 border-b border-gray-700 flex items-center px-3 cursor-grab shrink-0"
-        onMouseDown={handleDragStart}
-        onTouchStart={handleDragStart}
       >
-        <div className="flex items-center gap-2 text-gray-300 min-w-0 flex-1">
-          <GripHorizontal size={18} className="shrink-0" />
-          <span className="text-sm font-medium truncate">{activeProfile?.name || 'VNC'}</span>
-          <select
-            onChange={(e) => {
-              const [w, h] = e.target.value.split('x').map(Number);
-              handleResize(w, h);
-            }}
-            onClick={(e) => e.stopPropagation()}
-            value={`${size.width}x${size.height}`}
-            className="bg-gray-700 text-white text-xs px-2 py-0.5 rounded cursor-pointer ml-2"
-          >
-            {RESOLUTIONS.map((res) => (
-              <option key={res.label} value={`${res.width}x${res.height}`}>
-                {res.label}
-              </option>
-            ))}
-          </select>
+        <div
+          className="h-10 bg-gray-800 border-b border-gray-700 flex items-center px-3 cursor-grab shrink-0"
+          onMouseDown={handleDragStart}
+          onTouchStart={handleDragStart}
+        >
+          <div className="flex items-center gap-2 text-gray-300 min-w-0 flex-1">
+            <GripHorizontal size={18} className="shrink-0" />
+            <span className="text-sm font-medium truncate">{activeProfile?.name || 'VNC'}</span>
+            
+            <select
+              onChange={(e) => {
+                e.stopPropagation();
+                const [w, h] = e.target.value.split('x').map(Number);
+                handleResize(w, h);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              value={`${size.width}x${size.height}`}
+              className="bg-gray-700 text-white text-xs px-2 py-0.5 rounded cursor-pointer ml-2"
+            >
+              {RESOLUTIONS.map((res) => (
+                <option key={res.label} value={`${res.width}x${res.height}`}>
+                  {res.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-      </div>
 
       <div className="flex-1 relative overflow-hidden bg-black">
         {isPanning && (

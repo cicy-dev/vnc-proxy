@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Send, Settings, Wifi, WifiOff, X, Plus, Trash2, Edit2, Keyboard, Check, Mic, MicOff, Terminal, MessageSquare, Maximize, Loader2, CheckCircle, History, Menu, Sparkles } from 'lucide-react';
+import { Send, Settings, Wifi, WifiOff, X, Plus, Trash2, Edit2, Keyboard, Check, Mic, MicOff, Terminal, MessageSquare, Maximize, Grid, Loader2, CheckCircle, History, Menu, Sparkles } from 'lucide-react';
 import { DraggableVncFrame } from './components/DraggableVncFrame';
 import { FloatingPanel } from './components/FloatingPanel';
 import { VoiceFloatingButton } from './components/VoiceFloatingButton';
@@ -64,6 +64,10 @@ const App: React.FC = () => {
   const [sendSuccess, setSendSuccess] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
+  const [showVnc, setShowVnc] = useState(true);
+  const [showAllVnc, setShowAllVnc] = useState(false);
+  const [showMask, setShowMask] = useState(false);
+  const [topProfileId, setTopProfileId] = useState<string | null>(null);
   const [correctedText, setCorrectedText] = useState('');
   const [isCorrectingEnglish, setIsCorrectingEnglish] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -103,7 +107,7 @@ const App: React.FC = () => {
               'Authorization': `Bearer ${savedToken}`,
               'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ text: '', display: ':1' })
+            body: JSON.stringify({ text: '', target: ':1' })
           });
           if (res.ok || res.status === 200) {
             setToken(savedToken);
@@ -530,6 +534,7 @@ const App: React.FC = () => {
 
   const handleSelectProfile = (id: string) => {
     setSettings(prev => ({ ...prev, activeProfileId: id }));
+    setTopProfileId(id);
   };
 
   // Profile selector dropdown
@@ -552,17 +557,41 @@ const App: React.FC = () => {
   return (
     <div className="relative w-screen h-screen bg-black overflow-hidden font-sans">
       {/* Full Screen Iframes - display:none 隐藏非活跃的 */}
+      {/* Simple Mask - just block events */}
+      {showMask && (
+        <div 
+          className="absolute inset-0 z-[90]"
+          onClick={(e) => e.stopPropagation()}
+        />
+      )}
+
       <div 
         className="absolute inset-0 transition-all duration-300"
         style={{ 
           right: showSidebar ? '320px' : '0'
         }}
       >
-        <DraggableVncFrame 
-          profiles={settings.profiles}
-          activeProfileId={settings.activeProfileId}
-          isInteractingWithOverlay={isInteracting} 
-        />
+        <div className={`${showVnc ? 'block' : 'hidden'} w-full h-full`}>
+          <div className="flex flex-wrap gap-2 p-2">
+            {settings.profiles.map((profile, idx) => (
+              <div 
+                key={profile.id} 
+                className="flex-1 min-w-[400px]"
+                style={{ display: showAllVnc ? 'flex' : (profile.id === settings.activeProfileId ? 'flex' : 'none') }}
+              >
+                <DraggableVncFrame 
+                  profiles={settings.profiles}
+                  activeProfileId={profile.id}
+                  isInteractingWithOverlay={isInteracting}
+                  initialPosition={{ x: idx * 20, y: idx * 20 }}
+                  onSelectProfile={handleSelectProfile}
+                  topProfileId={topProfileId}
+                  visible={showAllVnc || profile.id === settings.activeProfileId}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Minimized Toggle Button (Visible when prompt is hidden) */}
@@ -636,6 +665,32 @@ const App: React.FC = () => {
                             {networkLatency !== null ? `${networkLatency}ms` : 'offline'}
                         </span>
                     </div>
+
+                    {/* VNC Toggle Button */}
+                    <button
+                        onClick={() => setShowAllVnc(!showAllVnc)}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                            showAllVnc 
+                            ? 'bg-green-600 text-white' 
+                            : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+                        }`}
+                        title={showAllVnc ? "Show All VNC" : "Show Single VNC"}
+                    >
+                        <Maximize size={16} />
+                    </button>
+
+                    {/* Mask Toggle Button */}
+                    <button
+                        onClick={() => setShowMask(!showMask)}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                            showMask 
+                            ? 'bg-purple-600 text-white' 
+                            : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+                        }`}
+                        title={showMask ? "Hide Mask" : "Show Mask"}
+                    >
+                        <Grid size={16} />
+                    </button>
 
                     {/* Voice Record Toggle - just highlight */}
                     <button

@@ -26,7 +26,7 @@ export const sendCommandToVnc = async (command: string, profileType?: string, tm
   const res = await fetch('/api/type', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ text: command, display: display || ':1' }),
+    body: JSON.stringify({ text: command, target: display || ':1' }),
   });
   const data = await res.json();
   return { success: data.success, message: data.success ? 'Typed to VNC' : data.error };
@@ -45,7 +45,7 @@ export const sendSystemEvent = async (event: SystemEvent, display?: string): Pro
     await fetch('/api/key', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ key: event.code, display: display || ':1' }),
+      body: JSON.stringify({ key: event.code, target: display || ':1' }),
     }).catch(() => {});
   }
 };
@@ -62,6 +62,6 @@ export const sendShortcut = async (key: string, display?: string): Promise<void>
   await fetch('/api/key', {
     method: 'POST',
     headers,
-    body: JSON.stringify({ key, display: display || ':1' }),
+    body: JSON.stringify({ key, target: display || ':1' }),
   }).catch(() => {});
 };
