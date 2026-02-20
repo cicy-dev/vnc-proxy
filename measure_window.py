@@ -125,82 +125,120 @@ class ProxyHandler(BaseHTTPRequestHandler):
         pass
 
 class MeasureWindow:
-    def __init__(self):
+    def __init__(self, display_num):
+        self.display_num = display_num
+        self.cmd_port = 8100 + display_num
+        
         self.root = tk.Tk()
         self.root.title("")
-        self.root.geometry("100x100+0+0")
+        self.root.geometry("150x150+30+30")
         self.root.attributes("-topmost", True)
         self.root.overrideredirect(True)
         
-        self.dragging = False
-        self.drag_start_x = 0
-        self.drag_start_y = 0
-        self.win_start_x = 0
-        self.win_start_y = 0
+        self.drag_x = 0
+        self.drag_y = 0
+        self.resize_w = 0
+        self.resize_h = 0
+        self.resize_x = 0
+        self.resize_y = 0
+        self.resize_corner = ""
         
         self.setup_ui()
         self.bind_events()
-        self.update_positions()
+        self.root.update_idletasks()
+        self.root.after(100, self.update_info)
         
     def setup_ui(self):
-        self.frame = tk.Frame(self.root, bg="#333333", relief="raised", bd=1)
-        self.frame.pack(fill="both", expand=True)
+        self.main_frame = tk.Frame(self.root, bg="#333333", highlightthickness=1, highlightbackground="gray")
+        self.main_frame.pack(fill="both", expand=True)
         
-        self.lbl_tl = tk.Label(self.frame, text="TL: 0,0", bg="#333333", fg="white", font=("Arial", 8))
-        self.lbl_tl.place(x=2, y=2)
+        style = {"bg": "#00ff00", "fg": "black", "font": ("Arial", 8, "bold")}
+        h = 14
         
-        self.lbl_tr = tk.Label(self.frame, text="TR: 0,0", bg="#333333", fg="white", font=("Arial", 8))
-        self.lbl_tr.place(x=2, y=2, anchor="ne")
+        self.lbl_tl = tk.Label(self.main_frame, **style)
+        self.lbl_tl.place(relx=0, rely=0, anchor="nw", height=h)
         
-        self.lbl_bl = tk.Label(self.frame, text="BL: 0,0", bg="#333333", fg="white", font=("Arial", 8))
-        self.lbl_bl.place(x=2, y=2, anchor="sw")
+        self.lbl_tr = tk.Label(self.main_frame, **style)
+        self.lbl_tr.place(relx=1, rely=0, anchor="ne", height=h)
         
-        self.lbl_br = tk.Label(self.frame, text="BR: 0,0", bg="#333333", fg="white", font=("Arial", 8))
-        self.lbl_br.place(x=2, y=2, anchor="se")
+        self.lbl_bl = tk.Label(self.main_frame, **style)
+        self.lbl_bl.place(relx=0, rely=1, anchor="sw", height=h)
         
-        self.lbl_center = tk.Label(self.frame, text="100x100", bg="#333333", fg="yellow", font=("Arial", 10, "bold"))
-        self.lbl_center.place(relx=0.5, rely=0.5, anchor="center")
+        self.lbl_br = tk.Label(self.main_frame, **style)
+        self.lbl_br.place(relx=1, rely=1, anchor="se", height=h)
         
-    def bind_events(self):
-        self.frame.bind("<Button-1>", self.on_click)
-        self.frame.bind("<B1-Motion>", self.on_drag)
-        self.frame.bind("<ButtonRelease-1>", self.on_release)
+        self.lbl_size = tk.Label(
+            self.main_frame, 
+            text="WxH", 
+            bg="#333333", 
+            fg="yellow", 
+            font=("Arial", 10, "bold")
+        )
+        self.lbl_size.place(relx=0.5, rely=0.5, anchor="center")
         
-        for widget in [self.lbl_tl, self.lbl_tr, self.lbl_bl, self.lbl_br, self.lbl_center]:
-            widget.bind("<Button-1>", self.on_click)
-            widget.bind("<B1-Motion>", self.on_drag)
-            widget.bind("<ButtonRelease-1>", self.on_release)
-            
-    def on_click(self, event):
-        self.dragging = True
-        self.drag_start_x = event.x
-        self.drag_start_y = event.y
-        self.win_start_x = self.root.winfo_x()
-        self.win_start_y = self.root.winfo_y()
-        
-    def on_drag(self, event):
-        if self.dragging:
-            dx = event.x - self.drag_start_x
-            dy = event.y - self.drag_start_y
-            new_x = self.win_start_x + dx
-            new_y = self.win_start_y + dy
-            self.root.geometry(f"+{new_x}+{new_y}")
-            self.update_positions()
-            
-    def on_release(self, event):
-        self.dragging = False
-        
-    def update_positions(self):
-        x = self.root.winfo_x()
-        y = self.root.winfo_y()
+    def update_info(self):
         w = self.root.winfo_width()
         h = self.root.winfo_height()
+        x = self.root.winfo_x()
+        y = self.root.winfo_y()
         
-        self.lbl_tl.config(text=f"TL: {x},{y}")
-        self.lbl_tr.config(text=f"TR: {x+w},{y}")
-        self.lbl_bl.config(text=f"BL: {x},{y+h}")
-        self.lbl_br.config(text=f"BR: {x+w},{y+h}")
-        self.lbl_center.config(text=f"{w}x{h}")
+        self.lbl_tl.config(text=f"{x},{y}")
+        self.lbl_tr.config(text=f"{x+w},{y}")
+        self.lbl_bl.config(text=f"{x},{y+h}")
+        self.lbl_br.config(text=f"{x+w},{y+h}")
+        self.lbl_size.config(text=f"{w}x{h}")
+        
+    def bind_events(self):
+        def start_drag(e):
+            self.drag_x = e.x
+            self.drag_y = e.y
+        def do_drag(e):
+            nx = self.root.winfo_x() + (e.x - self.drag_x)
+            ny = self.root.winfo_y() + (e.y - self.drag_y)
+            nx = max(0, nx)
+            ny = max(0, ny)
+            self.root.geometry(f"+{nx}+{ny}")
+            self.update_info()
+            
+        self.main_frame.bind("<Button-1>", start_drag)
+        self.main_frame.bind("<B1-Motion>", do_drag)
+        self.lbl_size.bind("<Button-1>", start_drag)
+        self.lbl_size.bind("<B1-Motion>", do_drag)
+        
+        def start_resize(corner):
+            def handler(e):
+                self.resize_w = self.root.winfo_width()
+                self.resize_h = self.root.winfo_height()
+                self.resize_x = e.x_root
+                self.resize_y = e.y_root
+                self.resize_corner = corner
+            return handler
+        def do_resize(e):
+            corner = self.resize_corner
+            nw = self.resize_w + (e.x_root - self.resize_x)
+            nh = self.resize_h + (e.y_root - self.resize_y)
+            nx = self.root.winfo_x()
+            ny = self.root.winfo_y()
+            
+            if nw >= 100 and nh >= 100:
+                if corner in ("tl", "bl"):
+                    nx = max(0, self.root.winfo_x() - (nw - self.resize_w))
+                if corner in ("tl", "tr"):
+                    ny = max(0, self.root.winfo_y() - (nh - self.resize_h))
+                self.root.geometry(f"{nw}x{nh}+{nx}+{ny}")
+                self.update_info()
+                
+        self.lbl_tl.bind("<Button-1>", start_resize("tl"))
+        self.lbl_tl.bind("<B1-Motion>", do_resize)
+        self.lbl_tr.bind("<Button-1>", start_resize("tr"))
+        self.lbl_tr.bind("<B1-Motion>", do_resize)
+        self.lbl_bl.bind("<Button-1>", start_resize("bl"))
+        self.lbl_bl.bind("<B1-Motion>", do_resize)
+        self.lbl_br.bind("<Button-1>", start_resize("br"))
+        self.lbl_br.bind("<B1-Motion>", do_resize)
+        
+    def update_positions(self):
+        self.update_info()
         
     def run(self):
         self.root.mainloop()
@@ -220,10 +258,11 @@ def start_proxy(port):
 
 if __name__ == "__main__":
     display = get_display()
+    os.environ['DISPLAY'] = display
     num = int(display.split(':')[1] if ':' in display else '1')
     port = BASE_PORT + num
     
     print(f'Starting {display} -> port {port}')
     
     threading.Thread(target=lambda: start_proxy(port), daemon=True).start()
-    MeasureWindow().run()
+    MeasureWindow(num).run()
