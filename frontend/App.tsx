@@ -11,14 +11,14 @@ import { AppSettings, VncProfile, Position, Size } from './types';
 const DEFAULT_PROFILE: VncProfile = {
   id: 'default',
   name: 'VNC :1',
-  url: 'https://g-6080.cicy.de5.net/vnc.html?autoconnect=true',
+  url: '/vnc/vnc.html?autoconnect=true&resize=scale&path=vnc/websockify',
   display: ':1'
 };
 
 const VNC2_PROFILE: VncProfile = {
   id: 'vnc2',
   name: 'VNC :2',
-  url: 'https://g-6082.cicy.de5.net/vnc.html?autoconnect=true',
+  url: '/vnc2/vnc.html?autoconnect=true&resize=scale&path=vnc2/websockify',
   display: ':2'
 };
 
@@ -101,15 +101,13 @@ const App: React.FC = () => {
       if (savedToken) {
         // Verify token is still valid
         try {
-          const res = await fetch('/api/type', {
+          const res = await fetch('https://g-fast-api.cicy.de5.net/api/auth/verify-token', {
             method: 'POST',
-            headers: { 
-              'Authorization': `Bearer ${savedToken}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ text: '', target: ':1' })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: savedToken })
           });
-          if (res.ok || res.status === 200) {
+          const data = await res.json();
+          if (res.ok && data.valid) {
             setToken(savedToken);
           } else {
             localStorage.removeItem('token');
@@ -247,7 +245,7 @@ const App: React.FC = () => {
     setCorrectedText('');
     
     try {
-      const response = await fetch('/api/correctEnglish', {
+      const response = await fetch('https://g-fast-api.cicy.de5.net/api/vnc/correctEnglish', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

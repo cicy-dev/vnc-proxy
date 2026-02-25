@@ -21,19 +21,22 @@ export const LoginForm: React.FC<LoginFormProps> = ({ onLogin }) => {
     setError('');
 
     try {
-      // Verify token by calling a protected API endpoint
-      const res = await fetch('/api/type', {
+      // 通过 FastAPI 认证中心验证 token
+      const apiBase = 'https://g-fast-api.cicy.de5.net';
+      const res = await fetch(`${apiBase}/api/auth/verify-token`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ text: '', target: ':1' })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
       });
 
-      if (res.ok || res.status === 200) {
-        localStorage.setItem('token', token);
-        onLogin(token);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.valid) {
+          localStorage.setItem('token', token);
+          onLogin(token);
+        } else {
+          setError('Invalid token');
+        }
       } else {
         setError('Invalid token');
       }

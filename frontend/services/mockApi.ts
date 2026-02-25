@@ -1,5 +1,7 @@
 import { SystemEvent } from '../types';
 
+const FAPI = 'https://g-fast-api.cicy.de5.net';
+
 export const sendCommandToVnc = async (command: string, profileType?: string, tmuxTarget?: string, display?: string): Promise<{ success: boolean; message: string }> => {
   console.log('[sendCommand]', { profileType, tmuxTarget, command, display });
   
@@ -13,7 +15,7 @@ export const sendCommandToVnc = async (command: string, profileType?: string, tm
   
   // ttyd 模式：tmux send-keys
   if (profileType === 'ttyd' && tmuxTarget) {
-    const res = await fetch('/api/tmux', {
+    const res = await fetch(`${FAPI}/api/tmux/send`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ text: command, target: tmuxTarget }),
@@ -23,7 +25,7 @@ export const sendCommandToVnc = async (command: string, profileType?: string, tm
   }
 
   // VNC 模式：xdotool type
-  const res = await fetch('/api/type', {
+  const res = await fetch(`${FAPI}/api/vnc/type`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ text: command, target: display || ':1' }),
@@ -42,7 +44,7 @@ export const sendSystemEvent = async (event: SystemEvent, display?: string): Pro
   }
 
   if (event.type === 'keydown') {
-    await fetch('/api/key', {
+    await fetch(`${FAPI}/api/vnc/key`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ key: event.code, target: display || ':1' }),
@@ -59,7 +61,7 @@ export const sendShortcut = async (key: string, display?: string): Promise<void>
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  await fetch('/api/key', {
+  await fetch(`${FAPI}/api/vnc/key`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ key, target: display || ':1' }),

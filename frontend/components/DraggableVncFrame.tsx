@@ -115,11 +115,19 @@ export const DraggableVncFrame: React.FC<DraggableVncFrameProps> = ({
 
   const getProfilesWithPassword = () => {
     const vncPassword = localStorage.getItem('vnc_password');
-    if (!vncPassword) return profiles;
+    const authToken = localStorage.getItem('token');
     return profiles.map(profile => {
-      if (!profile.url || profile.url.includes('password=')) return profile;
-      const separator = profile.url.includes('?') ? '&' : '?';
-      return { ...profile, url: `${profile.url}${separator}password=${encodeURIComponent(vncPassword)}` };
+      if (!profile.url) return profile;
+      let url = profile.url;
+      if (vncPassword && !url.includes('password=')) {
+        const sep = url.includes('?') ? '&' : '?';
+        url = `${url}${sep}password=${encodeURIComponent(vncPassword)}`;
+      }
+      if (authToken && !url.includes('token=')) {
+        const sep = url.includes('?') ? '&' : '?';
+        url = `${url}${sep}token=${encodeURIComponent(authToken)}`;
+      }
+      return { ...profile, url };
     });
   };
 
