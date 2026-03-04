@@ -7,6 +7,7 @@ const PORT = parseInt(process.env.PORT || '13335');
 const VNC_TARGET = process.env.VNC_TARGET || 'http://127.0.0.1:6080';
 const VNC2_TARGET = process.env.VNC2_TARGET || 'http://127.0.0.1:6082';
 const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:14444';
+const MEASURE_API_URL = process.env.MEASURE_API_URL || 'http://127.0.0.1:13431';
 
 // --- FastAPI 认证中心 ---
 interface TokenVerifyResult {
@@ -97,6 +98,22 @@ const server = http.createServer(async (req, res) => {
 
   if (urlPath === '/api/health') return json(res, { status: 'ok' });
 
+  // measure_window API 代理（默认 :1 -> 13431）
+  if (
+    urlPath === '/api/type' ||
+    urlPath === '/api/windows' ||
+    urlPath === '/api/screenshot' ||
+    urlPath === '/api/ui' ||
+    urlPath === '/api/open'
+  ) {
+    return (proxy as any).web(req, res, { target: MEASURE_API_URL });
+  }
+
+  // FastAPI 代理（避免前端跨域）
+  if (urlPath.startsWith('/api/vnc/') || (urlPath === '/api/tmux/send' && req.method === 'POST')) {
+    return (proxy as any).web(req, res, { target: FASTAPI_URL });
+  }
+
   // VNC HTTP 代理（/vnc → :6080, /vnc2 → :6082）
   // 静态资源免认证（安全由 VNC 密码 + WebSocket 认证保障）
   const vncMatch = req.url?.match(/^\/(vnc2?)(\/.*)?$/);
@@ -124,5 +141,6 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 VNC Proxy on :${PORT}`);
   console.log(`   /vnc  → ${VNC_TARGET}`);
   console.log(`   /vnc2 → ${VNC2_TARGET}`);
+  console.log(`   /api/*(measure) → ${MEASURE_API_URL}`);
   console.log(`   Auth: FastAPI ${FASTAPI_URL}`);
 });

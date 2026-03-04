@@ -1,128 +1,356 @@
-import tkinter as tk
 import sys
 import os
+import platform
+import time
 import threading
+import base64
+import tempfile
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
 import subprocess
 
+PLATFORM = platform.system()  # 'Linux' or 'Darwin' or 'Windows'
 BASE_PORT = 13430
 
+# --- Mac 辅助函数 ---
+def mac_get_ui_tree(app_name, max_depth=3):
+    """获取指定应用的 UI 元素树（通过调用外部脚本）"""
+    script_path = "/Users/ai/Desktop/get_ui_tree.py"
+    python_path = "/usr/bin/python3"  # 系统 python3
+    try:
+        r = subprocess.run([python_path, script_path, app_name, str(max_depth)], capture_output=True, text=True, timeout=10)
+        if not r.stdout:
+            return {"error": f"no stdout, stderr: {r.stderr}, code: {r.returncode}"}
+        try:
+            return json.loads(r.stdout)
+        except Exception as e:
+            return {"error": f"json parse failed: {str(e)}, stdout: {r.stdout[:500]}"}
+    except Exception as e:
+        return {"error": f"subprocess failed: {str(e)}"}
+
+# --- Windows 辅助函数 ---
+def win_get_ui_tree(app_name, max_depth=3):
+    """获取指定应用的 UI 元素树（Windows）"""
+    script_path = "C:/Users/Administrator/Desktop/get_ui_tree.py"
+    python_path = "python"
+    try:
+        r = subprocess.run([python_path, script_path, app_name, str(max_depth)], capture_output=True, text=True, timeout=10)
+        if not r.stdout:
+            return {"error": f"no stdout, stderr: {r.stderr}, code: {r.returncode}"}
+        try:
+            return json.loads(r.stdout)
+        except Exception as e:
+            return {"error": f"json parse failed: {str(e)}, stdout: {r.stdout[:500]}"}
+    except Exception as e:
+        return {"error": f"subprocess failed: {str(e)}"}
+
+def mac_screenshot(app_name=None):
+    """截图，返回压缩后的 JPEG bytes（<50KB）。app_name 指定则只截该窗口，否则全屏"""
+    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+        png_path = f.name
+    jpg_path = png_path.replace('.png', '.jpg')
+    try:
+        if app_name:
+            wid = _mac_get_window_id(app_name)
+            if wid:
+                subprocess.run(['screencapture', '-x', f'-l{wid}', png_path], timeout=5)
+            else:
+                subprocess.run(['screencapture', '-x', png_path], timeout=5)
+        else:
+            subprocess.run(['screencapture', '-x', png_path], timeout=5)
+        
+        if not os.path.exists(png_path) or os.path.getsize(png_path) == 0:
+            return None
+        
+        # 用 sips 压缩：缩放到宽度 1200px，转 JPEG 质量 40
+        subprocess.run(['sips', '-Z', '1200', '--setProperty', 'format', 'jpeg', '--setProperty', 'formatOptions', '40', png_path, '--out', jpg_path], timeout=10, capture_output=True)
+        
+        if os.path.exists(jpg_path) and os.path.getsize(jpg_path) > 0:
+            with open(jpg_path, 'rb') as f:
+                return f.read()
+        return None
+    finally:
+        for p in [png_path, jpg_path]:
+            if os.path.exists(p):
+                os.unlink(p)
+
+def _mac_get_window_id(app_name):
+    """用 swift 通过 CGWindowListCopyWindowInfo 获取指定 app 的主窗口 id"""
+    swift_code = f'''
+import CoreGraphics
+if let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] {{
+    for w in list {{
+        if let owner = w["kCGWindowOwnerName"] as? String, owner.lowercased().contains("{app_name.lower()}"),
+           let bounds = w["kCGWindowBounds"] as? [String: Any],
+           let width = bounds["Width"] as? Int, width > 50 {{
+            print(w["kCGWindowNumber"]!)
+            break
+        }}
+    }}
+}}'''
+    try:
+        r = subprocess.run(['swift', '-e', swift_code], capture_output=True, text=True, timeout=10)
+        wid = r.stdout.strip()
+        return int(wid) if wid.isdigit() else None
+    except:
+        return None
+
+def mac_list_windows():
+    """列出所有可见窗口"""
+    swift_code = '''
+import CoreGraphics
+import Foundation
+var result: [[String: Any]] = []
+if let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] {
+    for w in list {
+        guard let owner = w["kCGWindowOwnerName"] as? String,
+              let bounds = w["kCGWindowBounds"] as? [String: Any],
+              let width = bounds["Width"] as? Int, width > 50 else { continue }
+        let d: [String: Any] = ["id": w["kCGWindowNumber"]!, "app": owner, "title": w["kCGWindowName"] ?? "", "bounds": bounds]
+        if let data = try? JSONSerialization.data(withJSONObject: d), let s = String(data: data, encoding: .utf8) { print(s) }
+    }
+}'''
+    try:
+        r = subprocess.run(['swift', '-e', swift_code], capture_output=True, text=True, timeout=10)
+        windows = []
+        for line in r.stdout.strip().split('\n'):
+            if line.strip():
+                try: windows.append(json.loads(line))
+                except: pass
+        return windows
+    except:
+        return []
+
+def mac_type_text(text):
+    """Mac 上输入文字：写入剪贴板 + Cmd+V 粘贴"""
+    subprocess.run(['pbcopy'], input=text.encode(), timeout=5)
+    time.sleep(0.1)
+    # 用 osascript 发送 Cmd+V
+    subprocess.run(['osascript', '-e', 'tell application "System Events" to keystroke "v" using command down'], timeout=5)
+
+def mac_open_app(app_name):
+    """打开 Mac 应用"""
+    subprocess.run(['open', '-a', app_name], timeout=10)
+
+# --- Linux 辅助函数 ---
+def linux_type_text(text, target=':0'):
+    """Linux 上输入文字（原有逻辑）"""
+    env = os.environ.copy()
+    env['DISPLAY'] = target
+    if 'HOME' not in env:
+        env['HOME'] = os.path.expanduser('~')
+    # 获取当前窗口名字
+    result = subprocess.run(['xdotool', 'getactivewindow', 'getwindowname'], timeout=3, env=env, capture_output=True, text=True)
+    winname = result.stdout.strip().lower() if result.stdout else ''
+    is_terminal = any(x in winname for x in ['terminal', 'term', 'console', 'shell', 'bash', 'zsh', 'vscode', 'code'])
+
+    # 复制到剪贴板
+    subprocess.run(['bash', '-c', 'echo -n "$1" | xsel --clipboard --input', '_', text], timeout=5, env=env, capture_output=True)
+
+    if is_terminal:
+        print(f'[proxy] terminal/vscode detected: {winname}', flush=True)
+        time.sleep(0.3)
+        subprocess.run(['xdotool', 'getactivewindow', 'windowfocus'], timeout=5, env=env, capture_output=True)
+        time.sleep(0.1)
+        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+v'], timeout=5, env=env, capture_output=True)
+        time.sleep(1)
+        subprocess.run(['xdotool', 'key', 'Return'], timeout=5, env=env, capture_output=True)
+    else:
+        time.sleep(0.1)
+        subprocess.run(['xdotool', 'getactivewindow', 'windowfocus'], timeout=5, env=env, capture_output=True)
+        time.sleep(0.05)
+        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+v'], timeout=5, env=env, capture_output=True)
+        time.sleep(0.05)
+        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+v'], timeout=5, env=env, capture_output=True)
+        time.sleep(0.1)
+        subprocess.run(['xdotool', 'key', 'Return'], timeout=5, env=env, capture_output=True)
+
 class ProxyHandler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        if self.path == '/api/type':
-            length = int(self.headers['Content-Length'])
-            body = self.rfile.read(length)
-            try:
-                data = json.loads(body)
-                text = data.get('text', '').strip()
-                target = data.get('target', ':0')
-                
-                print(f'[proxy] "{text}" -> {target}', flush=True)
-                
-                env = os.environ.copy()
-                env['DISPLAY'] = target
-                
-                # 先获取当前窗口名字
-                result = subprocess.run(
-                    ['xdotool', 'getactivewindow', 'getwindowname'],
-                    timeout=3,
-                    env=env,
-                    capture_output=True,
-                    text=True
-                )
-                winname = result.stdout.strip().lower() if result.stdout else ''
-                
-                # 检查是否是终端或 VS Code
-                is_terminal = any(x in winname for x in ['terminal', 'term', 'console', 'shell', 'bash', 'zsh', 'vscode', 'code'])
-                
-                if is_terminal:
-                    # 终端/VS Code：使用剪贴板粘贴
-                    print(f'[proxy] terminal/vscode detected: {winname}', flush=True)
-                    subprocess.run(
-                        ['bash', '-c', f'echo -n "$1" | xsel --clipboard --input', '_', text],
-                        timeout=5,
-                        env=env,
-                        capture_output=True
-                    )
-                    import time
-                    time.sleep(0.3)
-                    subprocess.run(
-                        ['xdotool', 'getactivewindow', 'windowfocus'],
-                        timeout=5,
-                        env=env,
-                        capture_output=True
-                    )
-                    time.sleep(0.1)
-                    subprocess.run(
-                        ['xdotool', 'key', '--clearmodifiers', 'ctrl+v'],
-                        timeout=5,
-                        env=env,
-                        capture_output=True
-                    )
-                    time.sleep(1)
-                    # 发送 Enter
-                    subprocess.run(
-                        ['xdotool', 'key', 'Return'],
-                        timeout=5,
-                        env=env,
-                        capture_output=True
-                    )
-                else:
-                    # 非终端：先复制到剪贴板再粘贴
-                    subprocess.run(
-                        ['bash', '-c', f'echo -n "$1" | xsel --clipboard --input', '_', text],
-                        timeout=5,
-                        env=env,
-                        capture_output=True
-                    )
-                    
-                    import time
-                    time.sleep(0.1)
-                    
-                    # 聚焦并粘贴 (尝试 Ctrl+V 和 Ctrl+Shift+V)
-                    subprocess.run(
-                        ['xdotool', 'getactivewindow', 'windowfocus'],
-                        timeout=5,
-                        env=env,
-                        capture_output=True
-                    )
-                    
-                    time.sleep(0.05)
-                    
-                    # 先尝试 Ctrl+V
-                    subprocess.run(
-                        ['xdotool', 'key', '--clearmodifiers', 'ctrl+v'],
-                        timeout=5,
-                        env=env,
-                        capture_output=True
-                    )
-                    
-                    time.sleep(0.05)
-                    
-                    # 如果没反应，尝试 Ctrl+Shift+V
-                    subprocess.run(
-                        ['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+v'],
-                        timeout=5,
-                        env=env,
-                        capture_output=True
-                    )
-                
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({'success': True}).encode())
-            except Exception as e:
-                self.send_response(500)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({'success': False, 'error': str(e)}).encode())
+    def do_GET(self):
+        if self.path == '/api/screenshot' or self.path.startswith('/api/screenshot?'):
+            self._handle_screenshot_get()
+        elif self.path == '/api/windows':
+            self._handle_windows()
+        elif self.path.startswith('/api/ui?'):
+            self._handle_ui_tree()
         else:
             self.send_response(404)
             self.end_headers()
-    
+
+    def do_POST(self):
+        if self.path == '/api/type':
+            self._handle_type()
+        elif self.path == '/api/screenshot':
+            self._handle_screenshot_post()
+        elif self.path == '/api/open':
+            self._handle_open()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def _handle_type(self):
+        data = self._read_json()
+        if data is None: return
+        text = data.get('text', '').strip()
+        target = data.get('target', ':0')
+        print(f'[proxy] type "{text}" -> {target}', flush=True)
+        try:
+            if PLATFORM == 'Darwin':
+                mac_type_text(text)
+            else:
+                linux_type_text(text, target)
+            self._json_ok({'success': True})
+        except Exception as e:
+            self._json_err(str(e))
+
+    def _handle_screenshot_get(self):
+        """GET /api/screenshot?app=WeChat&loop=true — 返回 JPEG 图片或自动刷新页面"""
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        app_name = qs.get('app', [None])[0]
+        loop = qs.get('loop', ['false'])[0].lower() == 'true'
+        
+        if loop:
+            # 返回自动刷新的 HTML
+            url = f'/api/screenshot?app={app_name}' if app_name else '/api/screenshot'
+            html = f'''<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Screenshot Loop</title></head>
+<body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;height:100vh;">
+<img id="img" style="max-width:100%;max-height:100vh;" src="{url}">
+<script>setInterval(()=>{{document.getElementById('img').src='{url}?t='+Date.now()}}, 1000);</script>
+</body></html>'''
+            body = html.encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        
+        try:
+            if PLATFORM == 'Darwin':
+                img = mac_screenshot(app_name)
+            else:
+                img = self._linux_screenshot()
+            if img:
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/jpeg' if PLATFORM == 'Darwin' else 'image/png')
+                self.send_header('Content-Length', str(len(img)))
+                self.end_headers()
+                self.wfile.write(img)
+            else:
+                self._json_err('screenshot failed')
+        except Exception as e:
+            self._json_err(str(e))
+
+    def _handle_screenshot_post(self):
+        """POST /api/screenshot {app:"WeChat"} — 返回 base64"""
+        data = self._read_json() or {}
+        app_name = data.get('app')
+        try:
+            if PLATFORM == 'Darwin':
+                img = mac_screenshot(app_name)
+                fmt = 'jpeg'
+            else:
+                img = self._linux_screenshot()
+                fmt = 'png'
+            if img:
+                self._json_ok({'success': True, 'image': base64.b64encode(img).decode(), 'format': fmt})
+            else:
+                self._json_err('screenshot failed')
+        except Exception as e:
+            self._json_err(str(e))
+
+    def _handle_windows(self):
+        """GET /api/windows — 列出可见窗口"""
+        try:
+            if PLATFORM == 'Darwin':
+                self._json_ok({'windows': mac_list_windows()})
+            else:
+                self._json_ok({'windows': [], 'note': 'linux: not implemented'})
+        except Exception as e:
+            self._json_err(str(e))
+
+    def _handle_ui_tree(self):
+        """GET /api/ui?app=Chrome&depth=3 — 获取应用 UI 树"""
+        from urllib.parse import urlparse, parse_qs
+        qs = parse_qs(urlparse(self.path).query)
+        app_name = qs.get('app', ['Chrome'])[0]
+        depth = int(qs.get('depth', ['3'])[0])
+        try:
+            if PLATFORM == 'Darwin':
+                tree = mac_get_ui_tree(app_name, depth)
+            elif PLATFORM == 'Windows':
+                tree = win_get_ui_tree(app_name, depth)
+            else:
+                self._json_err('only supported on macOS and Windows')
+                return
+            
+            print(f"[DEBUG] tree type: {type(tree)}, has_error: {'error' in tree if isinstance(tree, dict) else 'N/A'}", flush=True)
+            if tree and isinstance(tree, dict) and "error" not in tree:
+                self._json_ok({'app': app_name, 'tree': tree})
+            else:
+                self._json_err(tree.get("error", "unknown error") if isinstance(tree, dict) else f"invalid result: {type(tree)}")
+        except Exception as e:
+            self._json_err(str(e))
+
+    def _handle_open(self):
+        """POST /api/open {app:"WeChat"}"""
+        data = self._read_json()
+        if data is None: return
+        app_name = data.get('app', '')
+        try:
+            if PLATFORM == 'Darwin':
+                mac_open_app(app_name)
+            else:
+                subprocess.Popen(['xdg-open', app_name] if '/' in app_name else [app_name],
+                                 env={**os.environ, 'DISPLAY': data.get('target', ':0')})
+            self._json_ok({'success': True})
+        except Exception as e:
+            self._json_err(str(e))
+
+    def _linux_screenshot(self):
+        """Linux 全屏截图"""
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+            path = f.name
+        try:
+            env = os.environ.copy()
+            subprocess.run(['import', '-window', 'root', path], timeout=10, env=env)
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                with open(path, 'rb') as f:
+                    return f.read()
+            return None
+        finally:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    def _read_json(self):
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            return json.loads(self.rfile.read(length)) if length else {}
+        except:
+            self._json_err('invalid json')
+            return None
+
+    def _json_ok(self, data):
+        body = json.dumps(data).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json_err(self, msg, code=500):
+        body = json.dumps({'success': False, 'error': msg}).encode()
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, format, *args):
         pass
+
+tk = None
 
 class MeasureWindow:
     def __init__(self, display_num):
@@ -251,18 +479,58 @@ def get_display():
             return arg.split('=')[1]
     return ':1'
 
+def get_port():
+    for i, arg in enumerate(sys.argv):
+        if arg in ['--port', '-p'] and i + 1 < len(sys.argv):
+            return int(sys.argv[i + 1])
+        if arg.startswith('--port='):
+            return int(arg.split('=')[1])
+    return None
+
 def start_proxy(port):
     server = HTTPServer(('0.0.0.0', port), ProxyHandler)
-    print(f'🚀 Proxy on :{port}')
+    print(f'🚀 Proxy on :{port} ({PLATFORM})', flush=True)
     server.serve_forever()
 
 if __name__ == "__main__":
-    display = get_display()
-    os.environ['DISPLAY'] = display
-    num = int(display.split(':')[1] if ':' in display else '1')
-    port = BASE_PORT + num
-    
-    print(f'Starting {display} -> port {port}')
-    
-    threading.Thread(target=lambda: start_proxy(port), daemon=True).start()
-    MeasureWindow(num).run()
+    port_override = get_port()
+
+    if PLATFORM == 'Darwin':
+        # Mac: 只启动 HTTP 服务，不需要 tkinter
+        port = port_override or BASE_PORT
+        print(f'Starting Mac proxy on :{port}', flush=True)
+        start_proxy(port)
+    elif PLATFORM == 'Windows':
+        # Windows: 只启动 HTTP 服务
+        port = port_override or BASE_PORT
+        print(f'Starting Windows proxy on :{port}', flush=True)
+        start_proxy(port)
+    else:
+        # Linux: 启动 HTTP 服务；若 tkinter 可用则附带测量窗口
+        display = get_display()
+        os.environ['DISPLAY'] = display
+        if not os.environ.get('XAUTHORITY'):
+            xauth_path = os.path.expanduser('~/.Xauthority')
+            if os.path.exists(xauth_path):
+                os.environ['XAUTHORITY'] = xauth_path
+        # Import tkinter after DISPLAY and XAUTHORITY are set
+        try:
+            import tkinter
+            tk = tkinter
+        except Exception:
+            tk = None
+        num = int(display.split(':')[1] if ':' in display else '1')
+        port = port_override or (BASE_PORT + num)
+        print(f'Starting {display} -> port {port}')
+        if tk is None:
+            print('tkinter not available, running headless proxy only', flush=True)
+            start_proxy(port)
+        else:
+            try:
+                win = MeasureWindow(num)
+            except Exception as e:
+                print(f'tkinter UI unavailable ({e}), running headless proxy only', flush=True)
+                start_proxy(port)
+            else:
+                threading.Thread(target=lambda: start_proxy(port), daemon=True).start()
+                win.run()

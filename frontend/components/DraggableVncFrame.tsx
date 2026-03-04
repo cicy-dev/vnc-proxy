@@ -36,6 +36,13 @@ export const DraggableVncFrame: React.FC<DraggableVncFrameProps> = ({
   const [panOffset, setPanOffset] = useState<Position>({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
 
+  useEffect(() => {
+    if (localStorage.getItem('vnc_password') === null) {
+      localStorage.setItem('vnc_password', '');
+      alert('Please configure vnc_password in localStorage before connecting VNC.');
+    }
+  }, []);
+
   const isOnTop = topProfileId ? topProfileId === activeProfileId : true;
 
   const windowRef = useRef<HTMLDivElement>(null);
@@ -115,17 +122,12 @@ export const DraggableVncFrame: React.FC<DraggableVncFrameProps> = ({
 
   const getProfilesWithPassword = () => {
     const vncPassword = localStorage.getItem('vnc_password');
-    const authToken = localStorage.getItem('token');
     return profiles.map(profile => {
       if (!profile.url) return profile;
       let url = profile.url;
       if (vncPassword && !url.includes('password=')) {
         const sep = url.includes('?') ? '&' : '?';
         url = `${url}${sep}password=${encodeURIComponent(vncPassword)}`;
-      }
-      if (authToken && !url.includes('token=')) {
-        const sep = url.includes('?') ? '&' : '?';
-        url = `${url}${sep}token=${encodeURIComponent(authToken)}`;
       }
       return { ...profile, url };
     });
