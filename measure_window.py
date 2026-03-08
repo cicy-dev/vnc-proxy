@@ -160,8 +160,6 @@ def linux_type_text(text, target=':0'):
         subprocess.run(['xdotool', 'getactivewindow', 'windowfocus'], timeout=5, env=env, capture_output=True)
         time.sleep(0.05)
         subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+v'], timeout=5, env=env, capture_output=True)
-        time.sleep(0.05)
-        subprocess.run(['xdotool', 'key', '--clearmodifiers', 'ctrl+shift+v'], timeout=5, env=env, capture_output=True)
         time.sleep(0.1)
         subprocess.run(['xdotool', 'key', 'Return'], timeout=5, env=env, capture_output=True)
 
