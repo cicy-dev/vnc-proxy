@@ -60,7 +60,7 @@ show_status() {
     
     if [ -f "/etc/systemd/system/vncserver@.service" ]; then
         VNC_SERVICE_INSTALLED=1
-        VNC_STATUS=$(systemctl is-active vncserver@1.service 2>/dev/null || echo 'inactive')
+        VNC_STATUS=$(systemctl is-active vncserver@1.service 2>&1)
         echo "  vncserver@1.service: $VNC_STATUS"
     else
         echo "  vncserver@1.service: NOT INSTALLED"
@@ -68,7 +68,7 @@ show_status() {
     
     if [ -f "/etc/systemd/system/novnc.service" ]; then
         NOVNC_SERVICE_INSTALLED=1
-        NOVNC_STATUS=$(systemctl is-active novnc.service 2>/dev/null || echo 'inactive')
+        NOVNC_STATUS=$(systemctl is-active novnc.service 2>&1)
         echo "  novnc.service: $NOVNC_STATUS"
     else
         echo "  novnc.service: NOT INSTALLED"
