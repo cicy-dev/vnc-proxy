@@ -19,14 +19,15 @@ Usage: vnc [COMMAND]
 Manage VNC server with noVNC web interface and measure_window service.
 
 Commands:
-  --start, -s       Start VNC and noVNC services
-  --stop            Stop VNC and noVNC services
-  --restart, -r     Restart VNC and noVNC services
-  --status          Show status of running services and log paths
-  --pwd             Set/change VNC password
-  --link            Create symlink to ~/.local/bin for global access
-  --version, -v     Show version information
-  --help, -h        Show this help message
+  --start, -s           Start VNC and noVNC services
+  --stop                Stop VNC and noVNC services
+  --restart, -r         Restart VNC and noVNC services
+  --status              Show status of running services and systemd services
+  --install-service     Install systemd services for auto-start on boot
+  --pwd                 Set/change VNC password
+  --link                Create symlink to ~/.local/bin for global access
+  --version, -v         Show version information
+  --help, -h            Show this help message
 
 Environment Variables:
   DISPLAY_NUM   VNC display number (default: 1)
@@ -38,6 +39,7 @@ Examples:
   DISPLAY_NUM=2 vnc --start      # Start Display :2
   NOVNC_PORT=6081 vnc --start    # Use port 6081
   vnc --status                   # Check status
+  sudo vnc --install-service     # Install auto-start services
   vnc --pwd                      # Set password
   vnc --link                     # Link to global bin
   vnc --stop                     # Stop services
@@ -50,30 +52,57 @@ EOF
 show_status() {
     echo "=== VNC Services Status ==="
     echo
-    echo "VNC Servers:"
+    
+    # Check systemd services
+    echo "Systemd Services:"
+    VNC_SERVICE_INSTALLED=0
+    NOVNC_SERVICE_INSTALLED=0
+    
+    if [ -f "/etc/systemd/system/vncserver@.service" ]; then
+        VNC_SERVICE_INSTALLED=1
+        VNC_STATUS=$(systemctl is-active vncserver@1.service 2>/dev/null || echo 'inactive')
+        echo "  vncserver@1.service: $VNC_STATUS"
+    else
+        echo "  vncserver@1.service: NOT INSTALLED"
+    fi
+    
+    if [ -f "/etc/systemd/system/novnc.service" ]; then
+        NOVNC_SERVICE_INSTALLED=1
+        NOVNC_STATUS=$(systemctl is-active novnc.service 2>/dev/null || echo 'inactive')
+        echo "  novnc.service: $NOVNC_STATUS"
+    else
+        echo "  novnc.service: NOT INSTALLED"
+    fi
+    echo
+    
+    # Show running processes
+    echo "Running Processes:"
+    echo "  VNC Servers:"
     if pgrep -fa "Xtigervnc" > /dev/null; then
-        pgrep -fa "Xtigervnc"
+        pgrep -fa "Xtigervnc" | sed 's/^/    /'
     else
-        echo "  No VNC servers running"
+        echo "    No VNC servers running"
     fi
     echo
-    echo "noVNC (websockify):"
+    echo "  noVNC (websockify):"
     if pgrep -fa "websockify" > /dev/null; then
-        pgrep -fa "websockify"
+        pgrep -fa "websockify" | sed 's/^/    /'
     else
-        echo "  No websockify processes running"
+        echo "    No websockify processes running"
     fi
     echo
-    echo "measure_window:"
+    echo "  measure_window:"
     if pgrep -fa "measure_window.py" > /dev/null; then
-        pgrep -fa "measure_window.py"
+        pgrep -fa "measure_window.py" | sed 's/^/    /'
     else
-        echo "  No measure_window processes running"
+        echo "    No measure_window processes running"
     fi
     echo
+    
     echo "Listening Ports:"
-    ss -tln | grep -E ":(59[0-9]{2}|60[0-9]{2}|134[0-9]{2})" || echo "  No VNC-related ports listening"
+    ss -tln | grep -E ":(59[0-9]{2}|60[0-9]{2}|134[0-9]{2})" | sed 's/^/  /' || echo "  No VNC-related ports listening"
     echo
+    
     echo "Log Files:"
     LOG_FOUND=0
     for log in /tmp/measure_*.log /tmp/vnc_reload_*.log; do
@@ -83,6 +112,18 @@ show_status() {
         fi
     done
     [ $LOG_FOUND -eq 0 ] && echo "  No log files found"
+    echo
+    
+    # Notify if services not installed
+    if [ $VNC_SERVICE_INSTALLED -eq 0 ] || [ $NOVNC_SERVICE_INSTALLED -eq 0 ]; then
+        echo "⚠️  WARNING: Systemd services not installed!"
+        echo "   Services will NOT auto-start after reboot."
+        echo
+        echo "   To install auto-start services, run:"
+        echo "   sudo vnc --install-service"
+        echo
+    fi
+    
     exit 0
 }
 
@@ -138,6 +179,62 @@ restart_services() {
     start_services
 }
 
+install_service() {
+    if [ "$EUID" -ne 0 ]; then
+        echo "Error: --install-service requires root privileges"
+        echo "Please run: sudo vnc --install-service"
+        exit 1
+    fi
+    
+    echo "Installing VNC systemd services..."
+    
+    # Create vncserver@.service
+    cat > /etc/systemd/system/vncserver@.service << 'EOFVNC'
+[Unit]
+Description=Remote desktop service (VNC)
+After=syslog.target network.target
+
+[Service]
+Type=forking
+User=w3c_offical
+ExecStart=/usr/bin/vncserver :%i -geometry 1920x1080 -depth 24
+ExecStop=/usr/bin/vncserver -kill :%i
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOFVNC
+    
+    # Create novnc.service
+    cat > /etc/systemd/system/novnc.service << 'EOFNOVNC'
+[Unit]
+Description=noVNC websockify proxy
+After=vncserver@1.service
+Requires=vncserver@1.service
+
+[Service]
+Type=simple
+User=w3c_offical
+ExecStart=/usr/bin/websockify --web=/usr/share/novnc 6080 localhost:5901
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOFNOVNC
+    
+    # Reload and enable
+    systemctl daemon-reload
+    systemctl enable vncserver@1.service novnc.service
+    
+    echo "✅ Services installed and enabled!"
+    echo
+    echo "Services will auto-start on next boot."
+    echo "To start now: sudo systemctl start vncserver@1.service novnc.service"
+    echo "To check status: vnc --status"
+    
+    exit 0
+}
+
 case "$1" in
     --help|-h)
         show_help
@@ -157,6 +254,9 @@ case "$1" in
         ;;
     --restart|-r)
         restart_services
+        ;;
+    --install-service)
+        install_service
         ;;
     --pwd)
         vncpasswd
